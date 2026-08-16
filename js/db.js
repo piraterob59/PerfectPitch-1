@@ -72,12 +72,16 @@ export function uuid() {
 
 class Store {
   constructor() {
-    this._db = null;
+    this._dbPromise = null;
   }
 
-  async db() {
-    if (!this._db) this._db = await openDB();
-    return this._db;
+  // Caches the in-flight promise, not just the resolved connection —
+  // otherwise two callers racing before the first openDB() resolves (e.g.
+  // init()'s renderLibrary() against an early importSong() right after
+  // page load) would each open their own separate IndexedDB connection.
+  db() {
+    if (!this._dbPromise) this._dbPromise = openDB();
+    return this._dbPromise;
   }
 
   async getAllSongs() {

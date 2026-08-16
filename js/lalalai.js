@@ -99,6 +99,13 @@ export async function pollTaskUntilDone(taskId, { intervalMs = 5000, timeoutMs =
     if (onStatus) onStatus(task.status, task.progress);
     if (task.status === 'success') return task.result; // { tracks: [{ url, label }, ...] }
     if (task.status === 'cancelled') throw new LalalRequestError('LALAL.AI task was cancelled');
+    // Confirmed statuses are 'progress' (still running) and the two above —
+    // anything else is an unrecognized/error status. Surface it immediately
+    // instead of silently polling for the full timeout and reporting a
+    // generic "timed out" that hides the real reason.
+    if (task.status !== 'progress') {
+      throw new LalalRequestError(`LALAL.AI task failed with unexpected status: ${task.status}`);
+    }
     if (Date.now() - start > timeoutMs) throw new LalalRequestError('LALAL.AI task timed out');
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -162,7 +169,7 @@ export async function separateVocals(file, { onProgress } = {}) {
   progress('separating', 0);
   const taskId = await startSplitTask(sourceId, { stem: 'vocals' });
   const result = await pollTaskUntilDone(taskId, {
-    onStatus: (status, pct) => progress('separating', status === 'progress' ? (pct || 10) : 10),
+    onStatus: (status, pct) => progress('separating', status === 'progress' ? (pct ?? 10) : 10),
   });
   progress('separating', 100);
 

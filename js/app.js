@@ -412,6 +412,12 @@ let pendingDeleteAttemptId = null;
 // be revoked before creating the next one, otherwise each attempt played
 // back in a session leaks its blob URL for the rest of the page's life.
 let currentAttemptVideoUrl = null;
+// attempt-video/-seek-bar/-duration are static elements shared across every
+// attempt row (see renderAttemptsList below) — bumped on each row click and
+// captured locally so a slower fixVideoDuration() call for an earlier click
+// can tell it's been superseded and skip applying its (now-stale) result to
+// whichever attempt is actually loaded by the time it resolves.
+let attemptPlaybackToken = 0;
 
 function accuracyClass(pct) {
   if (pct === null || pct === undefined) return '';
@@ -457,6 +463,7 @@ async function renderAttemptsList(songId) {
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
       li.addEventListener('click', async () => {
+        const token = ++attemptPlaybackToken;
         if (currentAttemptVideoUrl) URL.revokeObjectURL(currentAttemptVideoUrl);
         currentAttemptVideoUrl = URL.createObjectURL(attempt.videoBlob);
         attemptVideoEl.src = currentAttemptVideoUrl;
@@ -464,6 +471,7 @@ async function renderAttemptsList(songId) {
         attemptSeekBarEl.value = 0;
         attemptCurrentTimeEl.textContent = '0:00';
         const duration = await fixVideoDuration(attemptVideoEl);
+        if (token !== attemptPlaybackToken) return; // a later click already loaded a different attempt
         attemptSeekBarEl.max = duration || 0;
         attemptDurationEl.textContent = formatTime(duration);
         attemptVideoEl.play().catch(() => {}); // autoplay can be blocked; the Play button still works
@@ -483,9 +491,20 @@ let practiceSession = null; // { songId, player, visualizer, accuracyTracker, ra
 function stopPracticeSession() {
   if (!practiceSession) return;
   if (practiceSession.rafId) cancelAnimationFrame(practiceSession.rafId);
-  if (practiceSession.recorder) practiceSession.recorder.abort(); // discard, don't save a partial attempt
+  if (practiceSession.recorder) practiceSession.recorder.abort(); // still actively recording: genuinely abandoned
   if (practiceSession.micSession) practiceSession.micSession.stop();
-  if (practiceSession.audioContext) practiceSession.audioContext.close();
+  const { audioContext, pendingSave } = practiceSession;
+  if (audioContext) {
+    if (pendingSave) {
+      // A "Stop Singing" save is already flushing — the user asked to keep
+      // this one, so let it finish using this AudioContext's nodes instead
+      // of closing them out from under it. (A failure is already reported
+      // by the save flow itself; nothing more to do with it here.)
+      pendingSave.catch(() => {}).finally(() => audioContext.close());
+    } else {
+      audioContext.close();
+    }
+  }
   practiceSession.player.destroy();
   practiceSession = null;
 }
@@ -530,6 +549,7 @@ async function openPractice(songId) {
   practiceSession = {
     songId, player, visualizer, accuracyTracker,
     rafId: null, audioContext: null, playerSourceNode: null, micSession: null, recorder: null, attemptStartedAt: null,
+    pendingSave: null,
   };
 
   // Duration isn't known until the browser has parsed enough of the audio;
@@ -548,17 +568,28 @@ async function openPractice(songId) {
   // Attempts render lazily when "View Attempts" is opened, not here — no
   // point fetching and building that list every time a song is opened.
 
+  // Captured so loop() can tell it's been superseded — by a teardown *or*
+  // by a second openPractice() call racing this one (e.g. a fast double-tap
+  // on a song row, before either call's awaited DB reads above resolve) —
+  // and stop rescheduling itself either way. A bare `if (!practiceSession)`
+  // truthiness check isn't enough: it stays true for whichever session is
+  // *currently* assigned, so a superseded loop would just keep rendering
+  // (and its <audio> element playing) forever as an orphaned rAF chain that
+  // stopPracticeSession() can never reach, since practiceSession.rafId only
+  // ever holds one loop's id at a time.
+  const session = practiceSession;
+
   function loop() {
-    if (!practiceSession) return;
+    if (practiceSession !== session) return;
     visualizer.render(player.currentTime);
     seekBarEl.value = player.currentTime;
     seekCurrentTimeEl.textContent = formatTime(player.currentTime);
     if (!lyricCueTimeFocused) lyricCueTimeInput.value = formatTime(player.currentTime);
     if (!accuracyDisplayEl.hidden) {
-      const pct = practiceSession.accuracyTracker.getAccuracy();
+      const pct = session.accuracyTracker.getAccuracy();
       accuracyDisplayEl.textContent = `Accuracy: ${pct === null ? '--' : pct + '%'}`;
     }
-    practiceSession.rafId = requestAnimationFrame(loop);
+    session.rafId = requestAnimationFrame(loop);
   }
   loop();
 }
@@ -572,20 +603,25 @@ addLyricCueBtn.addEventListener('click', async () => {
   if (!practiceSession) return;
   const text = lyricCueInput.value.trim();
   if (!text) return;
+  // Captured up front so this handler can tell, after the await below,
+  // whether the user navigated away (Back/Library) mid-save — practiceSession
+  // itself may have been replaced or nulled by then.
+  const session = practiceSession;
   // Reads the editable timestamp field rather than the live playback
   // position directly — clicking a button always lags slightly behind the
   // moment you actually heard the word, so the field defaults to "now" but
   // lets that lag be corrected (or the cue placed anywhere else entirely).
   const parsed = parseTimeInput(lyricCueTimeInput.value);
-  const timeSec = parsed !== null ? Math.max(0, parsed) : practiceSession.player.currentTime;
-  const entry = await store.addLyricCue({ songId: practiceSession.songId, timeSec, text });
+  const timeSec = parsed !== null ? Math.max(0, parsed) : session.player.currentTime;
+  const entry = await store.addLyricCue({ songId: session.songId, timeSec, text });
+  if (practiceSession !== session) return; // torn down or replaced while saving
   practiceSession.visualizer.addLyricCue(entry.id, timeSec, text);
   lyricCueInput.value = '';
   await renderLyricCueList(practiceSession.songId);
 });
 
 startSingingBtn.addEventListener('click', async () => {
-  if (!practiceSession) return;
+  if (!practiceSession || startSingingBtn.disabled) return;
 
   if (practiceSession.micSession) {
     practiceSession.micSession.stop();
@@ -597,7 +633,11 @@ startSingingBtn.addEventListener('click', async () => {
     if (practiceSession.recorder) {
       const { recorder, accuracyTracker, attemptStartedAt, songId } = practiceSession;
       practiceSession.recorder = null;
-      try {
+      // Exposed on the session so stopPracticeSession() can let this finish
+      // saving instead of closing the AudioContext its nodes depend on if
+      // the user navigates away right now — they already asked to save
+      // this recording by clicking "Stop Singing".
+      const savePromise = (async () => {
         const videoBlob = await recorder.stop();
         await store.addAttempt({
           songId,
@@ -607,9 +647,15 @@ startSingingBtn.addEventListener('click', async () => {
           videoBlob,
           mimeType: videoBlob.type,
         });
+      })();
+      practiceSession.pendingSave = savePromise;
+      try {
+        await savePromise;
         if (practiceSession && practiceSession.songId === songId) await renderAttemptsList(songId);
       } catch (err) {
-        micStatusEl.textContent = `Recording could not be saved: ${err.message || err}`;
+        if (practiceSession) micStatusEl.textContent = `Recording could not be saved: ${err.message || err}`;
+      } finally {
+        if (practiceSession) practiceSession.pendingSave = null;
       }
     }
 
@@ -619,6 +665,12 @@ startSingingBtn.addEventListener('click', async () => {
     }
     return;
   }
+
+  // Disabled immediately (not just during the stop/save flow above) so a
+  // fast double-tap can't re-enter this branch before micSession is
+  // assigned below and end up starting two concurrent mic/AudioContext
+  // sessions that both feed the same accuracy tracker.
+  startSingingBtn.disabled = true;
 
   // AudioContext creation and getUserMedia both need to happen inside this
   // click handler on iOS Safari — they're gated on an active user gesture.
@@ -638,12 +690,6 @@ startSingingBtn.addEventListener('click', async () => {
       practiceSession.playerSourceNode = playerSourceNode;
     }
 
-    // Each fresh "Start Singing" is a new attempt, so its score starts clean
-    // rather than carrying over from a previous run earlier in the session.
-    practiceSession.accuracyTracker.reset();
-    accuracyDisplayEl.hidden = false;
-    accuracyDisplayEl.textContent = 'Accuracy: --';
-
     const session = practiceSession;
     const micSession = await startMicPitchTracking(audioContext, {
       onPitch: ({ freqHz, confidence }) => {
@@ -654,24 +700,42 @@ startSingingBtn.addEventListener('click', async () => {
       },
     });
     if (practiceSession !== session) { micSession.stop(); return; } // torn down while awaiting permission
+
+    // Reset/show the score only once the mic is actually confirmed live —
+    // doing this before the permission prompt (as before) left the UI
+    // showing a live "Accuracy: --" readout even after the user denied
+    // access, since the catch below never had reason to undo it.
+    practiceSession.accuracyTracker.reset();
+    accuracyDisplayEl.hidden = false;
+    accuracyDisplayEl.textContent = 'Accuracy: --';
+
     practiceSession.micSession = micSession;
     startSingingBtn.textContent = 'Stop Singing';
     micStatusEl.textContent = 'Listening…';
 
     if (isRecordingSupported()) {
-      practiceSession.recorder = createAttemptRecorder({
-        canvasEl: pitchCanvasEl,
-        audioContext,
-        playerSourceNode: practiceSession.playerSourceNode,
-        micStream: micSession.stream,
-      });
-      practiceSession.recorder.start();
-      practiceSession.attemptStartedAt = Date.now();
+      try {
+        practiceSession.recorder = createAttemptRecorder({
+          canvasEl: pitchCanvasEl,
+          audioContext,
+          playerSourceNode: practiceSession.playerSourceNode,
+          micStream: micSession.stream,
+        });
+        practiceSession.recorder.start();
+        practiceSession.attemptStartedAt = Date.now();
+      } catch (err) {
+        // The mic is genuinely live at this point — only recording setup
+        // failed — so this gets its own message instead of falling into
+        // the catch below and wrongly claiming the mic is unavailable.
+        micStatusEl.textContent = `Listening… (recording failed to start: ${err.message || err})`;
+      }
     } else {
       micStatusEl.textContent = 'Listening… (recording not supported on this browser)';
     }
   } catch (err) {
     micStatusEl.textContent = `Mic unavailable: ${err.message || err}`;
+  } finally {
+    if (practiceSession) startSingingBtn.disabled = false;
   }
 });
 
