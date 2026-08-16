@@ -9,6 +9,7 @@ import { createVisualizer } from './visualizer.js';
 import { startMicPitchTracking } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
+import { isSpeechRecognitionSupported, startLyricTranscription } from './speech.js';
 
 const TOLERANCE_META_KEY = 'pitchToleranceCents';
 const DEFAULT_TOLERANCE_CENTS = 5;
@@ -486,13 +487,14 @@ async function renderAttemptsList(songId) {
   }
 }
 
-let practiceSession = null; // { songId, player, visualizer, accuracyTracker, rafId, audioContext, playerSourceNode, micSession, recorder, attemptStartedAt }
+let practiceSession = null; // { songId, player, visualizer, accuracyTracker, rafId, audioContext, playerSourceNode, micSession, speechSession, recorder, attemptStartedAt }
 
 function stopPracticeSession() {
   if (!practiceSession) return;
   if (practiceSession.rafId) cancelAnimationFrame(practiceSession.rafId);
   if (practiceSession.recorder) practiceSession.recorder.abort(); // still actively recording: genuinely abandoned
   if (practiceSession.micSession) practiceSession.micSession.stop();
+  if (practiceSession.speechSession) practiceSession.speechSession.stop();
   const { audioContext, pendingSave } = practiceSession;
   if (audioContext) {
     if (pendingSave) {
@@ -548,7 +550,7 @@ async function openPractice(songId) {
   const accuracyTracker = createAccuracyTracker(pitchTimeline, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker,
-    rafId: null, audioContext: null, playerSourceNode: null, micSession: null, recorder: null, attemptStartedAt: null,
+    rafId: null, audioContext: null, playerSourceNode: null, micSession: null, speechSession: null, recorder: null, attemptStartedAt: null,
     pendingSave: null,
   };
 
@@ -626,6 +628,10 @@ startSingingBtn.addEventListener('click', async () => {
   if (practiceSession.micSession) {
     practiceSession.micSession.stop();
     practiceSession.micSession = null;
+    if (practiceSession.speechSession) {
+      practiceSession.speechSession.stop();
+      practiceSession.speechSession = null;
+    }
     startSingingBtn.textContent = 'Start Singing';
     startSingingBtn.disabled = true; // briefly, while the recording finishes flushing
     micStatusEl.textContent = 'Saving attempt…';
@@ -710,8 +716,33 @@ startSingingBtn.addEventListener('click', async () => {
     accuracyDisplayEl.textContent = 'Accuracy: --';
 
     practiceSession.micSession = micSession;
+
+    // Auto-transcribe only on the song's first sing-through (no lyric cues
+    // saved yet) — once cues exist, per the original spec they're retained
+    // and hand-editable via the existing Add Cue / edit / delete UI instead
+    // of being overwritten by a fresh transcription on every attempt.
+    let transcribing = false;
+    if (isSpeechRecognitionSupported()) {
+      const existingCues = await store.getLyricCuesForSong(session.songId);
+      if (practiceSession === session && existingCues.length === 0) {
+        practiceSession.speechSession = startLyricTranscription({
+          onResult: ({ text, isFinal }) => {
+            if (!isFinal || practiceSession !== session) return;
+            const timeSec = session.player.currentTime;
+            store.addLyricCue({ songId: session.songId, timeSec, text }).then((entry) => {
+              if (practiceSession !== session) return;
+              session.visualizer.addLyricCue(entry.id, timeSec, text);
+              renderLyricCueList(session.songId);
+            });
+          },
+          onError: (err) => console.warn('Speech recognition error:', err),
+        });
+        transcribing = true;
+      }
+    }
+
     startSingingBtn.textContent = 'Stop Singing';
-    micStatusEl.textContent = 'Listening…';
+    micStatusEl.textContent = transcribing ? 'Listening… (auto-transcribing lyrics)' : 'Listening…';
 
     if (isRecordingSupported()) {
       try {

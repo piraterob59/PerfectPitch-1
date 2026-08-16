@@ -1,4 +1,4 @@
-const CACHE_NAME = 'perfectpitch-v16';
+const CACHE_NAME = 'perfectpitch-v17';
 const APP_SHELL = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const APP_SHELL = [
   './js/app.js',
   './js/db.js',
   './js/lalalai.js',
+  './js/speech.js',
   './js/note-utils.js',
   './js/pitch.js',
   './js/analyze.js',
