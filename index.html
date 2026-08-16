@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>PerfectPitch</title>
+  <meta name="theme-color" content="#7c3aed" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PerfectPitch" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="app-title">PerfectPitch</h1>
+  </header>
+
+  <main id="views">
+    <section id="view-library" class="view active">
+      <div class="library-header">
+        <button id="import-btn" class="btn btn-primary">Import a song</button>
+        <input id="import-input" type="file" accept="audio/*" hidden />
+      </div>
+      <ul id="song-list" class="song-list"></ul>
+      <p id="library-empty" class="empty-state">No songs yet — import one to get started.</p>
+    </section>
+
+    <section id="view-processing" class="view">
+      <div class="processing-panel">
+        <h2 id="processing-title">Processing…</h2>
+        <p id="processing-status" class="processing-status">Uploading</p>
+        <div class="progress-track"><div id="processing-bar" class="progress-fill"></div></div>
+        <p id="processing-error" class="error-text" hidden></p>
+        <button id="processing-back-btn" class="btn btn-secondary">Back to library</button>
+      </div>
+    </section>
+
+    <section id="view-practice" class="view">
+      <div class="practice-panel">
+        <h2 id="practice-title">Song title</h2>
+        <canvas id="pitch-canvas"></canvas>
+        <div class="seek-row">
+          <span id="seek-current-time" class="seek-time">0:00</span>
+          <input id="seek-bar" class="slider seek-bar" type="range" min="0" max="0" step="0.01" value="0" />
+          <span id="seek-duration" class="seek-time">0:00</span>
+        </div>
+        <div class="practice-controls">
+          <button id="play-pause-btn" class="btn btn-secondary">Play</button>
+          <button id="start-singing-btn" class="btn btn-primary">Start Singing</button>
+        </div>
+        <p id="mic-status" class="mic-status"></p>
+        <p id="accuracy-display" class="accuracy-display" hidden>Accuracy: --</p>
+        <div class="lyric-cue-controls">
+          <input id="lyric-cue-time-input" type="text" class="lyric-cue-time-input" placeholder="0:00" inputmode="numeric" autocomplete="off" />
+          <input id="lyric-cue-input" type="text" class="lyric-cue-input" placeholder="Word(s) you hear" autocomplete="off" />
+          <button id="add-lyric-cue-btn" class="btn btn-secondary">Add Cue</button>
+        </div>
+        <ul id="lyric-cue-list" class="lyric-cue-list"></ul>
+
+        <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
+        <button id="practice-back-btn" class="btn btn-link">Back to library</button>
+      </div>
+    </section>
+
+    <section id="view-attempts" class="view">
+      <div class="practice-panel">
+        <h2 id="attempts-title">Attempts</h2>
+        <p id="attempts-empty" class="empty-state-small">No recorded attempts yet — tap "Start Singing" to make one.</p>
+        <ul id="attempts-list" class="attempts-list"></ul>
+        <div id="attempt-player" class="attempt-player" hidden>
+          <video id="attempt-video" class="attempt-video" playsinline></video>
+          <div class="seek-row">
+            <span id="attempt-current-time" class="seek-time">0:00</span>
+            <input id="attempt-seek-bar" class="slider seek-bar" type="range" min="0" max="0" step="0.01" value="0" />
+            <span id="attempt-duration" class="seek-time">0:00</span>
+          </div>
+          <button id="attempt-play-pause-btn" class="btn btn-secondary">Play</button>
+        </div>
+
+        <button id="attempts-back-btn" class="btn btn-link">Back to song</button>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="settings-panel">
+        <h2>Settings</h2>
+        <label class="tolerance-label" for="tolerance-slider">
+          Pitch accuracy target: <span id="tolerance-value">5</span> cents
+        </label>
+        <input id="tolerance-slider" class="slider tolerance-slider" type="range" min="5" max="50" step="1" value="5" />
+        <p class="settings-note">
+          How close (in cents — 100ths of a semitone) your sung pitch needs to land to the
+          original vocal's pitch to color green and count as a full-credit hit. Notes within 50
+          cents color yellow and count as half credit; anything further is red and counts as a
+          miss. Lower is stricter.
+        </p>
+
+        <h2>About</h2>
+        <p class="settings-note">
+          PerfectPitch separates vocals from instrumentals using LALAL.AI. Since LALAL.AI's API
+          blocks direct calls from a browser, imports go through a small proxy
+          (see <code>worker/README.md</code> in the project repo) that holds the LALAL.AI license
+          key server-side — nothing secret is stored on this device or in this app's code.
+        </p>
+        <p class="settings-note">
+          Everything else — your song library, separated stems, and pitch data — is stored only
+          on this device, in this browser's local database.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-view="library">Library</button>
+    <button class="tab-btn" data-view="settings">Settings</button>
+  </nav>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
