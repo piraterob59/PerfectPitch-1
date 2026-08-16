@@ -187,9 +187,16 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     // timeToX as the ribbon) but at a fixed height, not tied to the cue's
     // pitch — see the LYRIC_BAND_HEIGHT comment for why a pitch-linked
     // height couldn't reliably avoid overlapping the ribbon.
+    //
+    // Left-aligned, not centered: with textAlign 'center', a cue's text
+    // straddles its timestamp — so a longer phrase visually starts earlier
+    // (and a short one later) than the timestamp it's actually anchored to,
+    // by however many pixels half its own width happens to be. Left-align
+    // makes the text's leading edge land exactly on timeSec regardless of
+    // its length, so what you see lines up with the number in the cue list.
     ctx.fillStyle = '#f2f3f5';
     ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     for (const cue of cues) {
       if (cue.timeSec < rangeStart || cue.timeSec > rangeEnd) continue;
