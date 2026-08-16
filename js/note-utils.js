@@ -50,7 +50,11 @@ export const TIER_COLOR = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' 
 // Kept well above typical within-word unvoiced-consonant gaps (tens of ms)
 // so interpolation still bridges those, and well below a real instrumental
 // break (seconds), so only actual silence reads as "no target pitch here".
-const MAX_INTERPOLATION_GAP_SEC = 0.5;
+// Exported (not just used internally below) so visualizer.js's band
+// rendering can break on the same real-silence boundary that scoring and
+// live-dot coloring already respect, instead of drawing a straight edge
+// across a gap that shouldn't have a target pitch at all.
+export const MAX_INTERPOLATION_GAP_SEC = 0.5;
 
 // Finds the target pitch at time t by linearly interpolating between the
 // two nearest points in a pitch timeline's `points` array (voiced points

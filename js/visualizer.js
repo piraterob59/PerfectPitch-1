@@ -3,7 +3,7 @@
 // trailing color-coded line once mic.js is wired in. x maps time linearly;
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
-import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR } from './note-utils.js';
+import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC } from './note-utils.js';
 
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
@@ -148,11 +148,18 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
         top = [];
         bottom = [];
       };
+      let lastTimeSec = null;
       for (const p of points) {
-        if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { flushSegment(); continue; }
+        if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { flushSegment(); lastTimeSec = null; continue; }
+        // A gap this wide is real silence in the target vocal (see
+        // note-utils.js's MAX_INTERPOLATION_GAP_SEC) — break the band here
+        // instead of drawing a straight edge across it, so the band never
+        // implies a target pitch where scoring itself says there isn't one.
+        if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) flushSegment();
         const x = timeToX(p.timeSec, nowSec, w);
         top.push([x, midiToY(p.midi + halfWidthSemitones, h)]);
         bottom.push([x, midiToY(p.midi - halfWidthSemitones, h)]);
+        lastTimeSec = p.timeSec;
       }
       flushSegment();
       ctx.fill();
