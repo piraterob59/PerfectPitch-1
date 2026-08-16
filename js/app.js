@@ -19,6 +19,10 @@ const tabButtons = document.querySelectorAll('.tab-btn');
 export function switchView(name) {
   views.forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   tabButtons.forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+  // Settings is reachable mid-session (it doesn't tear practiceSession down —
+  // see wireTabbar's comment below), so "Return to Song" only makes sense,
+  // and is only shown, when there's actually a session left to return to.
+  if (name === 'settings') returnToSongBtn.hidden = !practiceSession;
 }
 
 function wireTabbar() {
@@ -50,6 +54,7 @@ function registerServiceWorker() {
 
 const toleranceSliderEl = document.getElementById('tolerance-slider');
 const toleranceValueEl = document.getElementById('tolerance-value');
+const returnToSongBtn = document.getElementById('return-to-song-btn');
 
 async function loadSettings() {
   const saved = await store.getMeta(TOLERANCE_META_KEY);
@@ -68,10 +73,14 @@ function wireSettings() {
       const cents = Number(toleranceSliderEl.value);
       practiceSession.accuracyTracker.setTolerance(cents);
       practiceSession.visualizer.setTolerance(cents);
+      practiceToleranceEl.textContent = `±${cents}¢`;
     }
   });
   toleranceSliderEl.addEventListener('change', () => {
     store.setMeta(TOLERANCE_META_KEY, Number(toleranceSliderEl.value));
+  });
+  returnToSongBtn.addEventListener('click', () => {
+    if (practiceSession) switchView('practice');
   });
 }
 
@@ -235,6 +244,7 @@ async function importSong(file) {
 // --- Practice ---
 
 const practiceTitleEl = document.getElementById('practice-title');
+const practiceToleranceEl = document.getElementById('practice-tolerance-badge');
 const pitchCanvasEl = document.getElementById('pitch-canvas');
 const seekBarEl = document.getElementById('seek-bar');
 const seekCurrentTimeEl = document.getElementById('seek-current-time');
@@ -543,6 +553,7 @@ async function openPractice(songId) {
   attemptDurationEl.textContent = '0:00';
 
   const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
+  practiceToleranceEl.textContent = `±${toleranceCents}¢`;
   const player = createPlayer(instrumentalStem.blob);
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
   const accuracyTracker = createAccuracyTracker(pitchTimeline, { toleranceCents });

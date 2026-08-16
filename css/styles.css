@@ -126,6 +126,10 @@ body {
 
 .error-text { color: var(--bad); margin-top: 12px; }
 
+.tolerance-badge { color: var(--accent); font-size: 14px; font-weight: 600; margin-left: 8px; }
+
+#return-to-song-btn { margin-bottom: 8px; padding: 8px 0; }
+
 #pitch-canvas {
   width: 100%;
   height: 220px;
