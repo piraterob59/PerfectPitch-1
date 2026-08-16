@@ -8,6 +8,12 @@ import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pi
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
 const LIVE_TRAIL_SEC = 2;
+// The yellow/red boundary is fixed at 50 cents (see note-utils.js's
+// pitchTier), same as scoring; red has no such fixed outer edge there
+// (anything beyond 50 cents is just "red", however far), so this gives the
+// red band a finite width to draw — as wide again as yellow's, an
+// arbitrary but proportionate choice rather than a real threshold.
+const RED_BAND_EXTRA_CENTS = 50;
 // Reserved vertical strip at the bottom of the canvas, exclusively for
 // lyric cue text. The ribbon's pitch-to-y mapping is compressed to end
 // above this strip (see midiToY), so the ribbon can never physically enter
@@ -65,6 +71,11 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     return TIER_COLOR[pitchTier(cents, toleranceGreenCents)];
   }
 
+  function hexToRgba(hex, alpha) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+
   function setTolerance(cents) {
     toleranceGreenCents = cents;
   }
@@ -112,29 +123,56 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
       ctx.stroke();
     }
 
-    // "now" line.
+    // Target pitch band: three nested colored corridors (red outermost,
+    // green innermost) following the target curve, widths driven by the
+    // same tolerance tiers scoring.js grades the live dots against — so
+    // "am I inside the green?" is answerable by eye, not just by the dot
+    // color. Drawn widest-to-narrowest so each narrower fill overpaints the
+    // middle of the one before it, leaving nested bands rather than
+    // stacked-alpha overlap.
+    const rangeStart = nowSec - WINDOW_SEC * NOW_FRAC;
+    const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
+
+    function drawPitchBand(halfWidthSemitones, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      let top = [];
+      let bottom = [];
+      const flushSegment = () => {
+        if (top.length >= 2) {
+          ctx.moveTo(top[0][0], top[0][1]);
+          for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
+          for (let i = bottom.length - 1; i >= 0; i--) ctx.lineTo(bottom[i][0], bottom[i][1]);
+          ctx.closePath();
+        }
+        top = [];
+        bottom = [];
+      };
+      for (const p of points) {
+        if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { flushSegment(); continue; }
+        const x = timeToX(p.timeSec, nowSec, w);
+        top.push([x, midiToY(p.midi + halfWidthSemitones, h)]);
+        bottom.push([x, midiToY(p.midi - halfWidthSemitones, h)]);
+      }
+      flushSegment();
+      ctx.fill();
+    }
+
+    const greenHalfWidth = toleranceGreenCents / 100;
+    const yellowHalfWidth = 50 / 100; // fixed boundary, matches pitchTier()
+    const redHalfWidth = yellowHalfWidth + RED_BAND_EXTRA_CENTS / 100;
+    drawPitchBand(redHalfWidth, hexToRgba(TIER_COLOR.red, 0.35));
+    drawPitchBand(yellowHalfWidth, hexToRgba(TIER_COLOR.yellow, 0.45));
+    drawPitchBand(greenHalfWidth, hexToRgba(TIER_COLOR.green, 0.55));
+
+    // "now" line — drawn after the (semi-transparent) band so it stays
+    // fully bright where it crosses it, not dulled by the fill underneath.
     const nowX = NOW_FRAC * w;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(nowX, 0);
     ctx.lineTo(nowX, h);
-    ctx.stroke();
-
-    // Target pitch ribbon.
-    const rangeStart = nowSec - WINDOW_SEC * NOW_FRAC;
-    const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
-    ctx.strokeStyle = '#7c3aed';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    let drawing = false;
-    for (const p of points) {
-      if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { drawing = false; continue; }
-      const x = timeToX(p.timeSec, nowSec, w);
-      const y = midiToY(p.midi, h);
-      if (!drawing) { ctx.moveTo(x, y); drawing = true; } else { ctx.lineTo(x, y); }
-    }
     ctx.stroke();
 
     // Lyric cues: rendered inside the reserved LYRIC_BAND_HEIGHT strip at
