@@ -192,10 +192,11 @@ body {
 
 .accuracy-display { color: var(--text); font-size: 15px; font-weight: 600; margin-top: 8px; }
 
-.lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; }
+.lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 .lyric-cue-input {
   flex: 1;
-  padding: 10px 12px;
+  height: 22px;
+  padding: 0 12px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -205,13 +206,21 @@ body {
 .lyric-cue-time-input {
   flex: 0 0 58px;
   width: 58px;
-  padding: 10px 8px;
+  height: 22px;
+  padding: 0 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
   font-size: 14px;
   text-align: center;
+}
+#add-lyric-cue-btn {
+  height: 22px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .lyric-cue-list {
