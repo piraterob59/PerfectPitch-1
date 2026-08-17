@@ -195,6 +195,7 @@ body {
 .lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 .lyric-cue-input {
   flex: 1;
+  min-width: 0;
   height: 22px;
   padding: 0 12px;
   border-radius: 8px;
@@ -217,10 +218,12 @@ body {
 }
 #add-lyric-cue-btn {
   height: 22px;
-  padding: 0 18px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .lyric-cue-list {
