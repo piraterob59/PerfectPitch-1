@@ -283,6 +283,15 @@ function formatDateTime(ms) {
   });
 }
 
+// Whole-song cumulative average alongside a 5s rolling average — the
+// cumulative figure alone stops moving meaningfully after the first few
+// bars (see scoring.js), so the rolling number is what actually reflects
+// how the last few seconds went.
+function formatAccuracyDisplay(cumulativePct, rollingPct) {
+  const fmt = (pct) => (pct === null ? '--' : pct + '%');
+  return `Accuracy: ${fmt(cumulativePct)} · Last 5s: ${fmt(rollingPct)}`;
+}
+
 // Accepts "M:SS" (matching formatTime's own output, so round-tripping
 // through the field is lossless) or a bare number of seconds. Returns null
 // on anything unparseable so the caller can fall back sensibly.
@@ -546,7 +555,7 @@ async function openPractice(songId) {
   seekCurrentTimeEl.textContent = '0:00';
   seekDurationEl.textContent = '0:00';
   accuracyDisplayEl.hidden = true;
-  accuracyDisplayEl.textContent = 'Accuracy: --';
+  accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
   pendingDeleteAttemptId = null;
   if (currentAttemptVideoUrl) { URL.revokeObjectURL(currentAttemptVideoUrl); currentAttemptVideoUrl = null; }
   attemptPlayerEl.hidden = true;
@@ -603,8 +612,9 @@ async function openPractice(songId) {
     seekCurrentTimeEl.textContent = formatTime(player.currentTime);
     if (!lyricCueTimeFocused) lyricCueTimeInput.value = formatTime(player.currentTime);
     if (!accuracyDisplayEl.hidden) {
-      const pct = session.accuracyTracker.getAccuracy();
-      accuracyDisplayEl.textContent = `Accuracy: ${pct === null ? '--' : pct + '%'}`;
+      const cumulativePct = session.accuracyTracker.getAccuracy();
+      const rollingPct = session.accuracyTracker.getRollingAccuracy(player.currentTime);
+      accuracyDisplayEl.textContent = formatAccuracyDisplay(cumulativePct, rollingPct);
     }
     session.rafId = requestAnimationFrame(loop);
   }
@@ -725,7 +735,7 @@ startSingingBtn.addEventListener('click', async () => {
     // access, since the catch below never had reason to undo it.
     practiceSession.accuracyTracker.reset();
     accuracyDisplayEl.hidden = false;
-    accuracyDisplayEl.textContent = 'Accuracy: --';
+    accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
 
     practiceSession.micSession = micSession;
     startSingingBtn.textContent = 'Stop Singing';
