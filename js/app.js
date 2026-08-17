@@ -253,7 +253,6 @@ const seekDurationEl = document.getElementById('seek-duration');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
-const practiceBackBtn = document.getElementById('practice-back-btn');
 const lyricCueTimeInput = document.getElementById('lyric-cue-time-input');
 const lyricCueInput = document.getElementById('lyric-cue-input');
 const addLyricCueBtn = document.getElementById('add-lyric-cue-btn');
@@ -768,12 +767,6 @@ playPauseBtn.addEventListener('click', () => {
     player.pause();
     playPauseBtn.textContent = 'Play';
   }
-});
-
-practiceBackBtn.addEventListener('click', async () => {
-  stopPracticeSession();
-  switchView('library');
-  await renderLibrary();
 });
 
 viewAttemptsBtn.addEventListener('click', async () => {
