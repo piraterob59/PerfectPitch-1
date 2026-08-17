@@ -73,6 +73,7 @@ function wireSettings() {
       const cents = Number(toleranceSliderEl.value);
       practiceSession.accuracyTracker.setTolerance(cents);
       practiceSession.visualizer.setTolerance(cents);
+      practiceSession.toleranceCents = cents;
       practiceToleranceEl.textContent = `±${cents}¢`;
     }
   });
@@ -465,10 +466,16 @@ async function renderAttemptsList(songId) {
     } else {
       li.innerHTML = `
         <span class="attempt-row-datetime"></span>
+        <span class="attempt-row-tolerance"></span>
         <span class="attempt-row-accuracy"></span>
         <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
       `;
       li.querySelector('.attempt-row-datetime').textContent = formatDateTime(attempt.startedAt);
+      // Older attempts predate this field and have no stored tolerance —
+      // left blank rather than guessing at a value that wasn't actually
+      // used to score them.
+      li.querySelector('.attempt-row-tolerance').textContent =
+        attempt.toleranceCents == null ? '' : `±${attempt.toleranceCents}¢`;
       const accuracyEl = li.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
@@ -558,7 +565,7 @@ async function openPractice(songId) {
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
   const accuracyTracker = createAccuracyTracker(pitchTimeline, { toleranceCents });
   practiceSession = {
-    songId, player, visualizer, accuracyTracker,
+    songId, player, visualizer, accuracyTracker, toleranceCents,
     rafId: null, audioContext: null, playerSourceNode: null, micSession: null, recorder: null, attemptStartedAt: null,
     pendingSave: null,
   };
@@ -642,7 +649,7 @@ startSingingBtn.addEventListener('click', async () => {
     micStatusEl.textContent = 'Saving attempt…';
 
     if (practiceSession.recorder) {
-      const { recorder, accuracyTracker, attemptStartedAt, songId } = practiceSession;
+      const { recorder, accuracyTracker, attemptStartedAt, songId, toleranceCents } = practiceSession;
       practiceSession.recorder = null;
       // Exposed on the session so stopPracticeSession() can let this finish
       // saving instead of closing the AudioContext its nodes depend on if
@@ -655,6 +662,7 @@ startSingingBtn.addEventListener('click', async () => {
           startedAt: attemptStartedAt,
           durationSec: (Date.now() - attemptStartedAt) / 1000,
           accuracyPct: accuracyTracker.getAccuracy(),
+          toleranceCents,
           videoBlob,
           mimeType: videoBlob.type,
         });
