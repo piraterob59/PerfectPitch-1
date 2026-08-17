@@ -7,7 +7,7 @@
 // which is trimmed to a short trailing window for rendering performance —
 // scoring needs the full singing-session history, not just what's on screen.
 
-import { centsOffPitch, interpolateTargetMidi, pitchTier, TIER_SCORE } from './note-utils.js';
+import { centsOffPitch, interpolateTargetMidi, pitchTier, TIER_SCORE, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
 
 export function createAccuracyTracker(pitchTimeline, { toleranceCents = 5 } = {}) {
   const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
@@ -25,8 +25,13 @@ export function createAccuracyTracker(pitchTimeline, { toleranceCents = 5 } = {}
     if (freqHz === null) return;
     const targetMidi = interpolateTargetMidi(points, timeSec);
     if (targetMidi === null) return;
+    const cents = centsOffPitch(freqHz, targetMidi);
+    // Wildly off (see MAX_SCOREABLE_CENTS_OFF) is excluded entirely, not
+    // scored as a "red" miss — likely noise/an octave error, not a
+    // genuine attempt, so it shouldn't count against the score either way.
+    if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) return;
     total++;
-    sumScore += TIER_SCORE[pitchTier(centsOffPitch(freqHz, targetMidi), tolerance)];
+    sumScore += TIER_SCORE[pitchTier(cents, tolerance)];
   }
 
   // Whole-percent accuracy, or null if nothing scoreable has come in yet

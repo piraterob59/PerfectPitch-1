@@ -3,7 +3,7 @@
 // trailing color-coded line once mic.js is wired in. x maps time linearly;
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
-import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC } from './note-utils.js';
+import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
 
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
@@ -209,9 +209,18 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     for (const s of liveSamples) {
       if (s.freqHz === null || s.timeSec < rangeStart) continue;
       const targetMidi = interpolateTargetMidi(s.timeSec);
+      let color = '#9aa1ab';
+      if (targetMidi !== null) {
+        const cents = centsOffPitch(s.freqHz, targetMidi);
+        // Matches scoring.js's own cutoff (see MAX_SCOREABLE_CENTS_OFF) —
+        // a sample this far off isn't scored, so it isn't drawn either,
+        // rather than cluttering the graph with likely noise/octave-error
+        // dots that don't correspond to anything the score reflects.
+        if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) continue;
+        color = liveColorForCents(cents);
+      }
       const x = timeToX(s.timeSec, nowSec, w);
       const y = midiToY(69 + 12 * Math.log2(s.freqHz / 440), h);
-      const color = targetMidi === null ? '#9aa1ab' : liveColorForCents(centsOffPitch(s.freqHz, targetMidi));
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, y, 3.5, 0, Math.PI * 2);

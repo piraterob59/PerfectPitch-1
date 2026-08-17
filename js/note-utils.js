@@ -43,6 +43,14 @@ export function pitchTier(cents, greenCents) {
 export const TIER_SCORE = { green: 1, yellow: 0.5, red: 0 };
 export const TIER_COLOR = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
 
+// A live sample this far off the target (2 full semitones) is almost never
+// a genuine, if badly missed, singing attempt — far more likely a mic
+// noise spike or an octave-detection error from pitch.js. Distinct from
+// (and well beyond) the tier system above: scoring.js excludes samples
+// past this from the score entirely rather than counting them as a scored
+// "red" miss, and visualizer.js doesn't draw a dot for them at all.
+export const MAX_SCOREABLE_CENTS_OFF = 200;
+
 // Real silence/unvoiced stretches in the target vocal show up as gaps in
 // `points` (freqHz:null entries already filtered out before this is
 // called) — analyze.js hops every ~10ms, so any surviving gap much wider
