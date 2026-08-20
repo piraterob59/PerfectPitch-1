@@ -470,11 +470,30 @@ function accuracyClass(pct) {
   return '';
 }
 
+// Slack for recorder start/stop latency around the song's actual end, so a
+// take that ran essentially the full song isn't flagged just because the
+// user's "Stop Singing" tap landed a beat late or early.
+const PARTIAL_ATTEMPT_SLACK_SEC = 2;
+
+// `songDurationSec` comes from the currently-open practice session's player
+// (see renderAttemptsList) — songs.durationSec itself is never populated
+// after import, so the live player is the only reliable source of the
+// song's actual length to compare a recording against.
+function isPartialAttempt(attempt, songDurationSec) {
+  if (!Number.isFinite(songDurationSec) || songDurationSec <= 0) return false;
+  return attempt.durationSec < songDurationSec - PARTIAL_ATTEMPT_SLACK_SEC;
+}
+
 async function renderAttemptsList(songId) {
   const attempts = await store.getAttemptsForSong(songId); // newest first
   attemptsListEl.innerHTML = '';
   attemptsEmptyEl.hidden = attempts.length > 0;
   attemptPlayerEl.hidden = true;
+
+  // Only reachable with a practiceSession open for this exact song (see
+  // viewAttemptsBtn's guard), so its player's real, decoded duration is
+  // available here even though songs.durationSec itself never is.
+  const songDurationSec = practiceSession?.songId === songId ? practiceSession.player.duration : null;
 
   // Counted up front so a collapsed day's header can say how many attempts
   // are inside it without needing a second pass once the group is built.
@@ -549,12 +568,18 @@ async function renderAttemptsList(songId) {
     } else {
       row.innerHTML = `
         <span class="attempt-row-datetime"></span>
+        <span class="attempt-row-partial" hidden>Partial</span>
         <span class="attempt-row-tolerance"></span>
         <span class="attempt-row-accuracy"></span>
         <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
       `;
       // Just the time — the day group's own header already carries the date.
       row.querySelector('.attempt-row-datetime').textContent = formatTimeOnly(attempt.startedAt);
+      // Left hidden (not shown as "false") when songDurationSec isn't
+      // available at all, rather than asserting "not partial" on data we
+      // don't actually have — same non-guessing spirit as the tolerance
+      // badge above.
+      row.querySelector('.attempt-row-partial').hidden = !isPartialAttempt(attempt, songDurationSec);
       // Older attempts predate this field and have no stored tolerance —
       // left blank rather than guessing at a value that wasn't actually
       // used to score them.
