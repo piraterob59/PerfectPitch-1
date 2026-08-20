@@ -277,9 +277,27 @@ function formatTime(sec) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function formatDateTime(ms) {
-  return new Date(ms).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+// Time only — used inside a day group, where the group's own header
+// already carries the date (see formatDayLabel/dayKeyFor below).
+function formatTimeOnly(ms) {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// Groups attempts by local calendar day (toDateString() ignores time-of-day
+// and is stable for same-day comparison without a timezone library).
+function dayKeyFor(ms) {
+  return new Date(ms).toDateString();
+}
+
+function formatDayLabel(ms) {
+  const d = new Date(ms);
+  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric',
+    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
   });
 }
 
@@ -446,48 +464,68 @@ function accuracyClass(pct) {
 }
 
 async function renderAttemptsList(songId) {
-  const attempts = await store.getAttemptsForSong(songId);
+  const attempts = await store.getAttemptsForSong(songId); // newest first
   attemptsListEl.innerHTML = '';
   attemptsEmptyEl.hidden = attempts.length > 0;
   attemptPlayerEl.hidden = true;
+
+  // Attempts arrive newest-first already, so a new day group starts
+  // exactly when dayKeyFor changes from the previous attempt — no need to
+  // re-sort or bucket into a map first.
+  let currentGroupEl = null;
+  let currentDayKey = null;
+
   for (const attempt of attempts) {
-    const li = document.createElement('li');
-    li.className = 'attempt-row';
+    const dayKey = dayKeyFor(attempt.startedAt);
+    if (dayKey !== currentDayKey) {
+      currentDayKey = dayKey;
+      currentGroupEl = document.createElement('div');
+      currentGroupEl.className = 'attempts-day-group';
+      const header = document.createElement('div');
+      header.className = 'attempts-day-header';
+      header.textContent = formatDayLabel(attempt.startedAt);
+      currentGroupEl.appendChild(header);
+      attemptsListEl.appendChild(currentGroupEl);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'attempt-row';
 
     if (pendingDeleteAttemptId === attempt.id) {
-      li.innerHTML = `
+      row.innerHTML = `
         <span class="song-row-confirm-text">Delete this attempt?</span>
         <button class="btn btn-secondary attempt-confirm-cancel">Cancel</button>
         <button class="btn btn-primary attempt-confirm-delete">Delete</button>
       `;
-      li.querySelector('.attempt-confirm-cancel').addEventListener('click', (e) => {
+      row.querySelector('.attempt-confirm-cancel').addEventListener('click', (e) => {
         e.stopPropagation();
         pendingDeleteAttemptId = null;
         renderAttemptsList(songId);
       });
-      li.querySelector('.attempt-confirm-delete').addEventListener('click', async (e) => {
+      row.querySelector('.attempt-confirm-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
         await store.deleteAttempt(attempt.id);
         pendingDeleteAttemptId = null;
         await renderAttemptsList(songId);
       });
     } else {
-      li.innerHTML = `
+      row.innerHTML = `
         <span class="attempt-row-datetime"></span>
         <span class="attempt-row-tolerance"></span>
         <span class="attempt-row-accuracy"></span>
         <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
       `;
-      li.querySelector('.attempt-row-datetime').textContent = formatDateTime(attempt.startedAt);
+      // Just the time — the day group's own header already carries the date.
+      row.querySelector('.attempt-row-datetime').textContent = formatTimeOnly(attempt.startedAt);
       // Older attempts predate this field and have no stored tolerance —
       // left blank rather than guessing at a value that wasn't actually
       // used to score them.
-      li.querySelector('.attempt-row-tolerance').textContent =
+      row.querySelector('.attempt-row-tolerance').textContent =
         attempt.toleranceCents == null ? '' : `±${attempt.toleranceCents}¢`;
-      const accuracyEl = li.querySelector('.attempt-row-accuracy');
+      const accuracyEl = row.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
-      li.addEventListener('click', async () => {
+      row.addEventListener('click', async () => {
         const token = ++attemptPlaybackToken;
         if (currentAttemptVideoUrl) URL.revokeObjectURL(currentAttemptVideoUrl);
         currentAttemptVideoUrl = URL.createObjectURL(attempt.videoBlob);
@@ -501,13 +539,13 @@ async function renderAttemptsList(songId) {
         attemptDurationEl.textContent = formatTime(duration);
         attemptVideoEl.play().catch(() => {}); // autoplay can be blocked; the Play button still works
       });
-      li.querySelector('.attempt-row-delete').addEventListener('click', (e) => {
+      row.querySelector('.attempt-row-delete').addEventListener('click', (e) => {
         e.stopPropagation();
         pendingDeleteAttemptId = attempt.id;
         renderAttemptsList(songId);
       });
     }
-    attemptsListEl.appendChild(li);
+    currentGroupEl.appendChild(row);
   }
 }
 
