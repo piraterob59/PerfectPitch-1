@@ -445,6 +445,13 @@ async function renderLyricCueList(songId) {
 // a text cue, so this uses the same Cancel/Delete confirm pattern as the
 // song list rather than the cue list's immediate delete.
 let pendingDeleteAttemptId = null;
+// Which day groups are currently expanded on the Attempts screen (keyed by
+// dayKeyFor's date string) — day groups start collapsed, so this only ever
+// holds days the user has actually opened. Reset whenever "View Attempts"
+// is entered fresh (see viewAttemptsBtn below), but preserved across the
+// re-renders a delete/cancel triggers within that same viewing session, so
+// expanding a day to delete something from it doesn't collapse it again.
+let expandedDayKeys = new Set();
 // The object URL currently loaded into attempt-video — tracked so it can
 // be revoked before creating the next one, otherwise each attempt played
 // back in a session leaks its blob URL for the rest of the page's life.
@@ -469,23 +476,54 @@ async function renderAttemptsList(songId) {
   attemptsEmptyEl.hidden = attempts.length > 0;
   attemptPlayerEl.hidden = true;
 
+  // Counted up front so a collapsed day's header can say how many attempts
+  // are inside it without needing a second pass once the group is built.
+  const countsByDay = new Map();
+  for (const attempt of attempts) {
+    const key = dayKeyFor(attempt.startedAt);
+    countsByDay.set(key, (countsByDay.get(key) || 0) + 1);
+  }
+
   // Attempts arrive newest-first already, so a new day group starts
   // exactly when dayKeyFor changes from the previous attempt — no need to
   // re-sort or bucket into a map first.
-  let currentGroupEl = null;
+  let currentRowsEl = null;
   let currentDayKey = null;
 
   for (const attempt of attempts) {
     const dayKey = dayKeyFor(attempt.startedAt);
     if (dayKey !== currentDayKey) {
       currentDayKey = dayKey;
-      currentGroupEl = document.createElement('div');
-      currentGroupEl.className = 'attempts-day-group';
-      const header = document.createElement('div');
+      const expanded = expandedDayKeys.has(dayKey);
+
+      const groupEl = document.createElement('div');
+      groupEl.className = 'attempts-day-group';
+
+      const header = document.createElement('button');
+      header.type = 'button';
       header.className = 'attempts-day-header';
-      header.textContent = formatDayLabel(attempt.startedAt);
-      currentGroupEl.appendChild(header);
-      attemptsListEl.appendChild(currentGroupEl);
+      header.setAttribute('aria-expanded', String(expanded));
+      const count = countsByDay.get(dayKey);
+      header.innerHTML = `
+        <span class="attempts-day-header-label"></span>
+        <span class="attempts-day-header-count"></span>
+        <span class="attempts-day-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+      `;
+      header.querySelector('.attempts-day-header-label').textContent = formatDayLabel(attempt.startedAt);
+      header.querySelector('.attempts-day-header-count').textContent = `${count} attempt${count === 1 ? '' : 's'}`;
+      header.addEventListener('click', () => {
+        if (expandedDayKeys.has(dayKey)) expandedDayKeys.delete(dayKey);
+        else expandedDayKeys.add(dayKey);
+        renderAttemptsList(songId);
+      });
+      groupEl.appendChild(header);
+
+      currentRowsEl = document.createElement('div');
+      currentRowsEl.className = 'attempts-day-rows';
+      currentRowsEl.hidden = !expanded;
+      groupEl.appendChild(currentRowsEl);
+
+      attemptsListEl.appendChild(groupEl);
     }
 
     const row = document.createElement('div');
@@ -545,7 +583,7 @@ async function renderAttemptsList(songId) {
         renderAttemptsList(songId);
       });
     }
-    currentGroupEl.appendChild(row);
+    currentRowsEl.appendChild(row);
   }
 }
 
@@ -821,6 +859,7 @@ viewAttemptsBtn.addEventListener('click', async () => {
   if (!practiceSession) return;
   attemptsTitleEl.textContent = practiceTitleEl.textContent;
   pendingDeleteAttemptId = null;
+  expandedDayKeys = new Set();
   switchView('attempts');
   await renderAttemptsList(practiceSession.songId);
 });
