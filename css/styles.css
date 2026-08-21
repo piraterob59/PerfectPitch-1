@@ -314,7 +314,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.attempts-day-header-count { font-size: 12px; flex-shrink: 0; }
+.attempts-day-header-count { font-size: 12px; flex-shrink: 0; color: #22d3ee; }
 .attempts-day-header-best { font-size: 12px; font-weight: 700; color: var(--good); flex: 1; text-align: left; }
 .attempts-day-chevron { font-size: 12px; flex-shrink: 0; }
 .attempts-day-rows {
