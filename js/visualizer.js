@@ -86,6 +86,13 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     while (liveSamples.length && liveSamples[0].timeSec < cutoff) liveSamples.shift();
   }
 
+  // Drops the live pitch trail entirely — used when discarding the current
+  // take (see app.js's Reset button) so old dots don't linger over a
+  // rewound, about-to-restart attempt.
+  function clearLiveSamples() {
+    liveSamples = [];
+  }
+
   // Inserts a newly-added cue in time order without needing to rebuild the
   // visualizer, so the "add cue" button in app.js can call this directly.
   // `id` matches the cue's id in db.js's lyricCues store, so a later
@@ -230,5 +237,5 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
   resize();
 
-  return { resize, render, pushLiveSample, addLyricCue, removeLyricCue, updateLyricCueText, setTolerance };
+  return { resize, render, pushLiveSample, clearLiveSamples, addLyricCue, removeLyricCue, updateLyricCueText, setTolerance };
 }

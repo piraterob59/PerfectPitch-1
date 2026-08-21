@@ -250,6 +250,7 @@ const pitchCanvasEl = document.getElementById('pitch-canvas');
 const seekBarEl = document.getElementById('seek-bar');
 const seekCurrentTimeEl = document.getElementById('seek-current-time');
 const seekDurationEl = document.getElementById('seek-duration');
+const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
@@ -881,6 +882,40 @@ startSingingBtn.addEventListener('click', async () => {
   } finally {
     if (practiceSession) startSingingBtn.disabled = false;
   }
+});
+
+resetAttemptBtn.addEventListener('click', () => {
+  // Same guard startSingingBtn's own handler uses — most importantly, it
+  // keeps this from firing during the brief window after "Stop Singing"
+  // where a save is still flushing: accuracyTracker.reset() below would
+  // otherwise zero out the very score that pending save is about to read.
+  if (!practiceSession || startSingingBtn.disabled) return;
+  const session = practiceSession;
+
+  // Discard whatever's currently being recorded/tracked — Reset means
+  // starting over, not saving a partial take.
+  if (session.recorder) {
+    session.recorder.abort(); // still actively recording: genuinely abandoned
+    session.recorder = null;
+  }
+  if (session.micSession) {
+    session.micSession.stop();
+    session.micSession = null;
+  }
+  session.attemptStartedAt = null;
+  session.accuracyTracker.reset();
+  session.visualizer.clearLiveSamples();
+
+  startSingingBtn.textContent = 'Start Singing';
+  micStatusEl.textContent = '';
+  accuracyDisplayEl.hidden = true;
+  accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
+
+  session.player.pause();
+  session.player.seek(0);
+  playPauseBtn.textContent = 'Play';
+  seekBarEl.value = 0;
+  seekCurrentTimeEl.textContent = '0:00';
 });
 
 playPauseBtn.addEventListener('click', () => {
