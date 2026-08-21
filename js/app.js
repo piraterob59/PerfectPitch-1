@@ -508,9 +508,16 @@ async function renderAttemptsList(songId) {
   // Counted up front so a collapsed day's header can say how many attempts
   // are inside it without needing a second pass once the group is built.
   const countsByDay = new Map();
+  // Best accuracy among that day's *complete* attempts only — a partial
+  // take stopped early shouldn't be able to win "best of the day" over a
+  // lower-scoring attempt that actually made it through the whole song.
+  const bestScoreByDay = new Map();
   for (const attempt of attempts) {
     const key = dayKeyFor(attempt.startedAt);
     countsByDay.set(key, (countsByDay.get(key) || 0) + 1);
+    if (attempt.accuracyPct === null || isPartialAttempt(attempt, songSpectrumEndSec)) continue;
+    const prevBest = bestScoreByDay.get(key);
+    if (prevBest === undefined || attempt.accuracyPct > prevBest) bestScoreByDay.set(key, attempt.accuracyPct);
   }
 
   // Attempts arrive newest-first already, so a new day group starts
@@ -533,13 +540,18 @@ async function renderAttemptsList(songId) {
       header.className = 'attempts-day-header';
       header.setAttribute('aria-expanded', String(expanded));
       const count = countsByDay.get(dayKey);
+      const bestScore = bestScoreByDay.get(dayKey);
       header.innerHTML = `
         <span class="attempts-day-header-label"></span>
         <span class="attempts-day-header-count"></span>
         <span class="attempts-day-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
       `;
       header.querySelector('.attempts-day-header-label').textContent = formatDayLabel(attempt.startedAt);
-      header.querySelector('.attempts-day-header-count').textContent = `${count} attempt${count === 1 ? '' : 's'}`;
+      const countText = `${count} attempt${count === 1 ? '' : 's'}`;
+      // Omitted (not "Best 0%" or similar) when the day has no complete
+      // attempt to actually credit a best score to.
+      header.querySelector('.attempts-day-header-count').textContent =
+        bestScore === undefined ? countText : `${countText} · Best ${bestScore}%`;
       header.addEventListener('click', () => {
         if (expandedDayKeys.has(dayKey)) expandedDayKeys.delete(dayKey);
         else expandedDayKeys.add(dayKey);
