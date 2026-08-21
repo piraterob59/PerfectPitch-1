@@ -470,30 +470,39 @@ function accuracyClass(pct) {
   return '';
 }
 
-// Slack for recorder start/stop latency around the song's actual end, so a
-// take that ran essentially the full song isn't flagged just because the
-// user's "Stop Singing" tap landed a beat late or early.
+// Slack around the song's last voiced point, so a take that was stopped
+// essentially at the end isn't flagged just because the user's "Stop
+// Singing" tap landed a beat before the very last analyzed frame.
 const PARTIAL_ATTEMPT_SLACK_SEC = 2;
 
-// `songDurationSec` comes from the currently-open practice session's player
-// (see renderAttemptsList) — songs.durationSec itself is never populated
-// after import, so the live player is the only reliable source of the
-// song's actual length to compare a recording against.
-function isPartialAttempt(attempt, songDurationSec) {
-  if (!Number.isFinite(songDurationSec) || songDurationSec <= 0) return false;
-  return attempt.durationSec < songDurationSec - PARTIAL_ATTEMPT_SLACK_SEC;
+// "Complete" means vocal input ran through to where the song's own pitch
+// spectrum ends — not just "sang for about as long as the song" (that's
+// also satisfied by, say, starting mid-song and singing to the end, or
+// missed by pausing partway through even after singing a full duration's
+// worth elsewhere). `songSpectrumEndSec` is the target timeline's last
+// voiced point (see renderAttemptsList); `attempt.endPlaybackSec` is where
+// playback actually was the moment "Stop Singing" was clicked.
+function isPartialAttempt(attempt, songSpectrumEndSec) {
+  if (!Number.isFinite(songSpectrumEndSec) || songSpectrumEndSec <= 0) return false;
+  if (!Number.isFinite(attempt.endPlaybackSec)) return false; // older attempts predate this field
+  return attempt.endPlaybackSec < songSpectrumEndSec - PARTIAL_ATTEMPT_SLACK_SEC;
 }
 
 async function renderAttemptsList(songId) {
-  const attempts = await store.getAttemptsForSong(songId); // newest first
+  const [attempts, pitchTimeline] = await Promise.all([
+    store.getAttemptsForSong(songId), // newest first
+    store.getPitchTimeline(songId),
+  ]);
   attemptsListEl.innerHTML = '';
   attemptsEmptyEl.hidden = attempts.length > 0;
   attemptPlayerEl.hidden = true;
 
-  // Only reachable with a practiceSession open for this exact song (see
-  // viewAttemptsBtn's guard), so its player's real, decoded duration is
-  // available here even though songs.durationSec itself never is.
-  const songDurationSec = practiceSession?.songId === songId ? practiceSession.player.duration : null;
+  // Where the song's target pitch data actually ends — same voiced-points
+  // filter visualizer.js/scoring.js use — not the raw audio's total
+  // duration, which can run past (or, in principle, differ from) the last
+  // analyzed vocal frame.
+  const voicedPoints = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
+  const songSpectrumEndSec = voicedPoints.length ? voicedPoints[voicedPoints.length - 1].timeSec : null;
 
   // Counted up front so a collapsed day's header can say how many attempts
   // are inside it without needing a second pass once the group is built.
@@ -579,7 +588,7 @@ async function renderAttemptsList(songId) {
       // available at all, rather than asserting "not partial" on data we
       // don't actually have — same non-guessing spirit as the tolerance
       // badge above.
-      row.querySelector('.attempt-row-partial').hidden = !isPartialAttempt(attempt, songDurationSec);
+      row.querySelector('.attempt-row-partial').hidden = !isPartialAttempt(attempt, songSpectrumEndSec);
       // Older attempts predate this field and have no stored tolerance —
       // left blank rather than guessing at a value that wasn't actually
       // used to score them.
@@ -759,7 +768,12 @@ startSingingBtn.addEventListener('click', async () => {
     micStatusEl.textContent = 'Saving attempt…';
 
     if (practiceSession.recorder) {
-      const { recorder, accuracyTracker, attemptStartedAt, songId, toleranceCents } = practiceSession;
+      const { recorder, accuracyTracker, attemptStartedAt, songId, toleranceCents, player } = practiceSession;
+      // Captured now, not after the async recorder.stop() below — this is
+      // the playback position at the exact moment "Stop Singing" was
+      // clicked, which is what "did singing cover the whole song" should
+      // actually be judged against (see isPartialAttempt).
+      const endPlaybackSec = player.currentTime;
       practiceSession.recorder = null;
       // Exposed on the session so stopPracticeSession() can let this finish
       // saving instead of closing the AudioContext its nodes depend on if
@@ -773,6 +787,7 @@ startSingingBtn.addEventListener('click', async () => {
           durationSec: (Date.now() - attemptStartedAt) / 1000,
           accuracyPct: accuracyTracker.getAccuracy(),
           toleranceCents,
+          endPlaybackSec,
           videoBlob,
           mimeType: videoBlob.type,
         });
