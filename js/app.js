@@ -6,7 +6,7 @@ import { separateVocals } from './lalalai.js';
 import { analyzeSongVocals } from './analyze.js';
 import { createPlayer } from './player.js';
 import { createVisualizer } from './visualizer.js';
-import { startMicPitchTracking } from './mic.js';
+import { startMicPitchTracking, getAnalysisLatencySec } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
 
@@ -836,10 +836,16 @@ startSingingBtn.addEventListener('click', async () => {
     }
 
     const session = practiceSession;
+    // Each pitch estimate reflects audio from slightly before the moment
+    // its message arrives (see getAnalysisLatencySec) — subtracted here so
+    // a sample is compared against where the target pitch actually was
+    // when that audio was captured, not wherever playback has since moved
+    // on to.
+    const micLatencySec = getAnalysisLatencySec(audioContext.sampleRate);
     const micSession = await startMicPitchTracking(audioContext, {
       onPitch: ({ freqHz, confidence }) => {
         if (practiceSession !== session) return; // session torn down mid-flight
-        const t = session.player.currentTime;
+        const t = Math.max(0, session.player.currentTime - micLatencySec);
         session.visualizer.pushLiveSample(t, freqHz, confidence);
         session.accuracyTracker.addSample(t, freqHz);
       },

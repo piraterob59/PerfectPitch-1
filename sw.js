@@ -1,4 +1,4 @@
-const CACHE_NAME = 'perfectpitch-v36';
+const CACHE_NAME = 'perfectpitch-v37';
 const APP_SHELL = [
   './',
   './index.html',
