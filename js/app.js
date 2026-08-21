@@ -9,6 +9,7 @@ import { createVisualizer } from './visualizer.js';
 import { startMicPitchTracking, getAnalysisLatencySec } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
+import { computeVocalSections } from './note-utils.js';
 
 const TOLERANCE_META_KEY = 'pitchToleranceCents';
 const DEFAULT_TOLERANCE_CENTS = 5;
@@ -270,6 +271,7 @@ const attemptPlayPauseBtn = document.getElementById('attempt-play-pause-btn');
 const attemptSeekBarEl = document.getElementById('attempt-seek-bar');
 const attemptCurrentTimeEl = document.getElementById('attempt-current-time');
 const attemptDurationEl = document.getElementById('attempt-duration');
+const attemptSectionBreakdownEl = document.getElementById('attempt-section-breakdown');
 
 function formatTime(sec) {
   if (!Number.isFinite(sec) || sec < 0) return '0:00';
@@ -471,6 +473,27 @@ function accuracyClass(pct) {
   return '';
 }
 
+// Older attempts predate sectionBreakdown entirely (undefined, not just
+// empty) — rendered as no list at all rather than a misleading empty one.
+function renderSectionBreakdown(sectionBreakdown) {
+  attemptSectionBreakdownEl.innerHTML = '';
+  if (!sectionBreakdown) return;
+  sectionBreakdown.forEach((section, i) => {
+    const li = document.createElement('li');
+    li.className = 'attempt-section-row';
+    li.innerHTML = `
+      <span class="attempt-section-label"></span>
+      <span class="attempt-section-pct"></span>
+    `;
+    li.querySelector('.attempt-section-label').textContent =
+      `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
+    const pctEl = li.querySelector('.attempt-section-pct');
+    pctEl.textContent = section.accuracyPct === null ? '—' : `${section.accuracyPct}%`;
+    pctEl.className = `attempt-section-pct ${accuracyClass(section.accuracyPct)}`;
+    attemptSectionBreakdownEl.appendChild(li);
+  });
+}
+
 // Slack around the song's last voiced point, so a take that was stopped
 // essentially at the end isn't flagged just because the user's "Stop
 // Singing" tap landed a beat before the very last analyzed frame.
@@ -623,6 +646,7 @@ async function renderAttemptsList(songId) {
         attemptPlayerEl.hidden = false;
         attemptSeekBarEl.value = 0;
         attemptCurrentTimeEl.textContent = '0:00';
+        renderSectionBreakdown(attempt.sectionBreakdown);
         const duration = await fixVideoDuration(attemptVideoEl);
         if (token !== attemptPlaybackToken) return; // a later click already loaded a different attempt
         attemptSeekBarEl.max = duration || 0;
@@ -694,12 +718,18 @@ async function openPractice(songId) {
   attemptSeekBarEl.max = 0;
   attemptCurrentTimeEl.textContent = '0:00';
   attemptDurationEl.textContent = '0:00';
+  attemptSectionBreakdownEl.innerHTML = '';
 
   const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
   practiceToleranceEl.textContent = `±${toleranceCents}¢`;
   const player = createPlayer(instrumentalStem.blob);
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
-  const accuracyTracker = createAccuracyTracker(pitchTimeline, { toleranceCents });
+  // Verses/phrases the song's own vocal splits into, separated by a real
+  // silence gap (instrumental break, long pause) — computed once here from
+  // the target timeline, not per-attempt, since it's a property of the
+  // song itself.
+  const songSections = computeVocalSections((pitchTimeline?.points || []).filter((p) => p.freqHz !== null));
+  const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents,
     rafId: null, audioContext: null, playerSourceNode: null, micSession: null, recorder: null, attemptStartedAt: null,
@@ -792,6 +822,10 @@ startSingingBtn.addEventListener('click', async () => {
       // clicked, which is what "did singing cover the whole song" should
       // actually be judged against (see isPartialAttempt).
       const endPlaybackSec = player.currentTime;
+      // Also captured now, not after the async recorder.stop() — the
+      // tracker's per-section sums are already final at the moment singing
+      // actually stopped.
+      const sectionBreakdown = accuracyTracker.getSectionBreakdown();
       practiceSession.recorder = null;
       // Exposed on the session so stopPracticeSession() can let this finish
       // saving instead of closing the AudioContext its nodes depend on if
@@ -806,6 +840,7 @@ startSingingBtn.addEventListener('click', async () => {
           accuracyPct: accuracyTracker.getAccuracy(),
           toleranceCents,
           endPlaybackSec,
+          sectionBreakdown,
           videoBlob,
           mimeType: videoBlob.type,
         });

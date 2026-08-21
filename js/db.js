@@ -218,10 +218,10 @@ class Store {
     return txDone(t, existing);
   }
 
-  async addAttempt({ songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, videoBlob, mimeType }) {
+  async addAttempt({ songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, sectionBreakdown, videoBlob, mimeType }) {
     const db = await this.db();
     const t = tx(db, 'attempts', 'readwrite');
-    const entry = { id: uuid(), songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, videoBlob, mimeType, createdAt: Date.now() };
+    const entry = { id: uuid(), songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, sectionBreakdown, videoBlob, mimeType, createdAt: Date.now() };
     t.objectStore('attempts').put(entry);
     return txDone(t, entry);
   }

@@ -368,6 +368,21 @@ body {
 .attempt-video { width: 100%; border-radius: 12px; display: block; background: #000; }
 .attempt-player .seek-row { margin-top: 8px; }
 .attempt-player .btn { margin-top: 8px; }
+.attempt-section-breakdown { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.attempt-section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.attempt-section-label { color: var(--text-dim); }
+.attempt-section-pct { font-weight: 700; color: var(--good); flex-shrink: 0; }
+.attempt-section-pct.accuracy-low { color: var(--bad); }
+.attempt-section-pct.accuracy-mid { color: var(--warn); }
 
 .settings-note { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-top: 10px; }
 .settings-note code { color: var(--text); }

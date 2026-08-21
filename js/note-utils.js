@@ -73,6 +73,28 @@ export const MAX_INTERPOLATION_GAP_SEC = 0.5;
 // Shared by visualizer.js (to color live samples) and scoring.js (to score
 // them), so there's one interpolation implementation, not two that could
 // drift.
+// Splits a voiced-points-only timeline (freqHz:null entries already
+// filtered out) into contiguous "sections" — runs of points uninterrupted
+// by a real silence gap (see MAX_INTERPOLATION_GAP_SEC above), e.g. verses
+// or phrases separated by an instrumental break or a long pause. Used to
+// give per-attempt accuracy a meaningful breakdown instead of one
+// whole-song average.
+export function computeVocalSections(voicedPoints) {
+  const sections = [];
+  let startSec = null;
+  let lastTimeSec = null;
+  for (const p of voicedPoints) {
+    if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) {
+      sections.push({ startSec, endSec: lastTimeSec });
+      startSec = null;
+    }
+    if (startSec === null) startSec = p.timeSec;
+    lastTimeSec = p.timeSec;
+  }
+  if (startSec !== null) sections.push({ startSec, endSec: lastTimeSec });
+  return sections;
+}
+
 export function interpolateTargetMidi(points, t) {
   if (!points.length) return null;
   let lo = 0;
