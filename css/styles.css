@@ -140,6 +140,10 @@ body {
   border-radius: 12px;
   display: block;
 }
+/* Grows into the space the Add Cue controls/list free up while they're
+   hidden during singing (see app.js's setSingingLayout) — the added
+   height roughly matches that section's own worst-case footprint. */
+#pitch-canvas.singing { height: 430px; }
 
 .seek-row {
   display: flex;

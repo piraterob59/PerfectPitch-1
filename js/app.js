@@ -255,6 +255,7 @@ const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
+const lyricCueControlsEl = document.getElementById('lyric-cue-controls');
 const lyricCueTimeInput = document.getElementById('lyric-cue-time-input');
 const lyricCueInput = document.getElementById('lyric-cue-input');
 const addLyricCueBtn = document.getElementById('add-lyric-cue-btn');
@@ -769,6 +770,7 @@ async function openPractice(songId) {
   playPauseBtn.textContent = 'Play';
   startSingingBtn.textContent = 'Start Singing';
   startSingingBtn.disabled = false;
+  setSingingLayout(false); // ensure a fresh song always opens in the default (not-singing) layout
   micStatusEl.textContent = '';
   lyricCueInput.value = '';
   lyricCueTimeInput.value = '0:00';
@@ -876,12 +878,27 @@ addLyricCueBtn.addEventListener('click', async () => {
   await renderLyricCueList(practiceSession.songId);
 });
 
+// Hides the Add Cue row + lyric cue list while actively singing and grows
+// the pitch graph into the space they free up (see #pitch-canvas.singing),
+// since the dynamic vertical-zoom graph (see visualizer.js) is what you're
+// actually watching while singing, and the extra height gives it more room
+// to read clearly. Shown again (canvas back to its default height) once
+// singing stops, so the cue-adding workflow is unaffected outside of an
+// active take.
+function setSingingLayout(isSinging) {
+  lyricCueControlsEl.hidden = isSinging;
+  lyricCueListEl.hidden = isSinging;
+  pitchCanvasEl.classList.toggle('singing', isSinging);
+  if (practiceSession) practiceSession.visualizer.resize();
+}
+
 startSingingBtn.addEventListener('click', async () => {
   if (!practiceSession || startSingingBtn.disabled) return;
 
   if (practiceSession.micSession) {
     practiceSession.micSession.stop();
     practiceSession.micSession = null;
+    setSingingLayout(false);
     startSingingBtn.textContent = 'Start Singing';
     startSingingBtn.disabled = true; // briefly, while the recording finishes flushing
     micStatusEl.textContent = 'Saving attempt…';
@@ -985,6 +1002,7 @@ startSingingBtn.addEventListener('click', async () => {
     accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
 
     practiceSession.micSession = micSession;
+    setSingingLayout(true);
     startSingingBtn.textContent = 'Stop Singing';
     micStatusEl.textContent = 'Listening…';
 
@@ -1040,6 +1058,7 @@ resetAttemptBtn.addEventListener('click', () => {
   session.attemptStartedAt = null;
   session.accuracyTracker.reset();
   session.visualizer.clearLiveSamples();
+  setSingingLayout(false);
 
   startSingingBtn.textContent = 'Start Singing';
   micStatusEl.textContent = '';
