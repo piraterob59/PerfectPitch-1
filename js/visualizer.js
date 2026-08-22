@@ -20,7 +20,7 @@ const RED_BAND_EXTRA_CENTS = 50;
 // it no matter how the pitch curves — a fixed offset near each cue's own
 // point isn't enough, since text has width and the curve can dip lower at
 // the text's edges than it does at the cue's exact timestamp.
-const LYRIC_BAND_HEIGHT = 32;
+const LYRIC_BAND_HEIGHT = 48;
 
 export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
@@ -202,8 +202,8 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     // by however many pixels half its own width happens to be. Left-align
     // makes the text's leading edge land exactly on timeSec regardless of
     // its length, so what you see lines up with the number in the cue list.
-    ctx.fillStyle = '#f2f3f5';
-    ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = TIER_COLOR.green;
+    ctx.font = 'bold 26px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     for (const cue of cues) {
