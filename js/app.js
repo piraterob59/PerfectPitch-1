@@ -499,6 +499,7 @@ function renderSectionBreakdown(attempt, token) {
     li.innerHTML = `
       <span class="attempt-section-label"></span>
       <span class="attempt-section-pct"></span>
+      <button type="button" class="attempt-section-redo-btn" title="Redo this section">Redo</button>
     `;
     li.querySelector('.attempt-section-label').textContent =
       `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
@@ -514,6 +515,21 @@ function renderSectionBreakdown(attempt, token) {
         attemptVideoEl.play().catch(() => {});
       });
     }
+    // Redo: back to Practice with the *song* (not the attempt video)
+    // paused and parked at this section's lead-in — unlike the row's own
+    // click above, this only needs section.startSec on the song's own
+    // timeline, so it works even on attempts that predate startPlaybackSec.
+    li.querySelector('.attempt-section-redo-btn').addEventListener('click', (e) => {
+      e.stopPropagation(); // don't also trigger the row's own video-seek click
+      if (!practiceSession) return;
+      const seekSec = Math.max(0, section.startSec - SECTION_LEADIN_SEC);
+      practiceSession.player.pause();
+      practiceSession.player.seek(seekSec);
+      playPauseBtn.textContent = 'Play';
+      seekBarEl.value = seekSec;
+      seekCurrentTimeEl.textContent = formatTime(seekSec);
+      switchView('practice');
+    });
     attemptSectionBreakdownEl.appendChild(li);
   });
 }
