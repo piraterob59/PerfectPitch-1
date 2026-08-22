@@ -367,7 +367,7 @@ body {
 .attempt-player { margin-top: 10px; }
 .attempt-video { width: 100%; border-radius: 12px; display: block; background: #000; }
 .attempt-player .seek-row { margin-top: 8px; }
-.attempt-player .btn { margin-top: 8px; }
+.attempt-player-controls { display: flex; gap: 10px; margin-top: 8px; }
 .attempt-section-breakdown { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .attempt-section-row {
   display: flex;

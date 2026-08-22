@@ -268,6 +268,7 @@ const attemptsEmptyEl = document.getElementById('attempts-empty');
 const attemptPlayerEl = document.getElementById('attempt-player');
 const attemptVideoEl = document.getElementById('attempt-video');
 const attemptPlayPauseBtn = document.getElementById('attempt-play-pause-btn');
+const attemptResetBtn = document.getElementById('attempt-reset-btn');
 const attemptSeekBarEl = document.getElementById('attempt-seek-bar');
 const attemptCurrentTimeEl = document.getElementById('attempt-current-time');
 const attemptDurationEl = document.getElementById('attempt-duration');
@@ -368,13 +369,23 @@ attemptPlayPauseBtn.addEventListener('click', () => {
   else attemptVideoEl.pause();
 });
 attemptVideoEl.addEventListener('play', () => { attemptPlayPauseBtn.textContent = 'Pause'; });
-attemptVideoEl.addEventListener('pause', () => { attemptPlayPauseBtn.textContent = 'Play'; });
+attemptVideoEl.addEventListener('pause', () => { attemptPlayPauseBtn.textContent = 'Start'; });
 attemptVideoEl.addEventListener('timeupdate', () => {
   attemptSeekBarEl.value = attemptVideoEl.currentTime;
   attemptCurrentTimeEl.textContent = formatTime(attemptVideoEl.currentTime);
 });
 attemptSeekBarEl.addEventListener('input', () => {
   attemptVideoEl.currentTime = parseFloat(attemptSeekBarEl.value);
+});
+// Discards nothing (there's no separate "take" to abandon here, unlike the
+// Practice screen's Reset) — just pauses and rewinds this attempt's own
+// playback back to the start.
+attemptResetBtn.addEventListener('click', () => {
+  attemptVideoEl.pause();
+  attemptVideoEl.currentTime = 0;
+  attemptSeekBarEl.value = 0;
+  attemptCurrentTimeEl.textContent = '0:00';
+  attemptPlayPauseBtn.textContent = 'Start';
 });
 
 // Tracks the cue (if any) currently showing its inline text-edit field in
@@ -686,6 +697,7 @@ async function renderAttemptsList(songId) {
         attemptPlayerEl.hidden = false;
         attemptSeekBarEl.value = 0;
         attemptCurrentTimeEl.textContent = '0:00';
+        attemptPlayPauseBtn.textContent = 'Start'; // not necessarily still accurate from a previous attempt's playback state
         renderSectionBreakdown(attempt, token);
         const readyPromise = fixVideoDuration(attemptVideoEl);
         attemptVideoReadyPromise = readyPromise;
@@ -693,7 +705,9 @@ async function renderAttemptsList(songId) {
         if (token !== attemptPlaybackToken) return; // a later click already loaded a different attempt
         attemptSeekBarEl.max = duration || 0;
         attemptDurationEl.textContent = formatTime(duration);
-        attemptVideoEl.play().catch(() => {}); // autoplay can be blocked; the Play button still works
+        // Left paused — the user starts playback themselves via the Start
+        // button, rather than it playing automatically as soon as an
+        // attempt is chosen.
       });
       row.querySelector('.attempt-row-delete').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -760,6 +774,7 @@ async function openPractice(songId) {
   attemptSeekBarEl.max = 0;
   attemptCurrentTimeEl.textContent = '0:00';
   attemptDurationEl.textContent = '0:00';
+  attemptPlayPauseBtn.textContent = 'Start';
   attemptSectionBreakdownEl.innerHTML = '';
 
   const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
