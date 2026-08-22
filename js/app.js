@@ -465,6 +465,13 @@ let currentAttemptVideoUrl = null;
 // can tell it's been superseded and skip applying its (now-stale) result to
 // whichever attempt is actually loaded by the time it resolves.
 let attemptPlaybackToken = 0;
+// Resolves once fixVideoDuration()'s own seek-to-end-and-back workaround
+// (see below) has settled for whichever attempt is currently loaded —
+// section clicks await this first so their seek doesn't race with, and
+// get silently overwritten by, that in-flight duration-fix.
+let attemptVideoReadyPromise = null;
+
+const SECTION_LEADIN_SEC = 3;
 
 function accuracyClass(pct) {
   if (pct === null || pct === undefined) return '';
@@ -475,12 +482,20 @@ function accuracyClass(pct) {
 
 // Older attempts predate sectionBreakdown entirely (undefined, not just
 // empty) — rendered as no list at all rather than a misleading empty one.
-function renderSectionBreakdown(sectionBreakdown) {
+// `token` is this row's attemptPlaybackToken snapshot, so a section click
+// that resolves after a later row click has superseded it becomes a no-op
+// instead of seeking whatever attempt is now actually loaded.
+function renderSectionBreakdown(attempt, token) {
   attemptSectionBreakdownEl.innerHTML = '';
-  if (!sectionBreakdown) return;
-  sectionBreakdown.forEach((section, i) => {
+  if (!attempt.sectionBreakdown) return;
+  // The video's own time 0 is when recording started, not song time 0 (see
+  // attemptStartPlaybackSec) — without that anchor there's no reliable way
+  // to map a section's song-timeline time onto a position in this video,
+  // so older attempts recorded before it existed just aren't clickable.
+  const canSeek = Number.isFinite(attempt.startPlaybackSec);
+  attempt.sectionBreakdown.forEach((section, i) => {
     const li = document.createElement('li');
-    li.className = 'attempt-section-row';
+    li.className = canSeek ? 'attempt-section-row clickable' : 'attempt-section-row';
     li.innerHTML = `
       <span class="attempt-section-label"></span>
       <span class="attempt-section-pct"></span>
@@ -490,6 +505,15 @@ function renderSectionBreakdown(sectionBreakdown) {
     const pctEl = li.querySelector('.attempt-section-pct');
     pctEl.textContent = section.accuracyPct === null ? '—' : `${section.accuracyPct}%`;
     pctEl.className = `attempt-section-pct ${accuracyClass(section.accuracyPct)}`;
+    if (canSeek) {
+      li.addEventListener('click', async () => {
+        await attemptVideoReadyPromise; // let fixVideoDuration's own seek settle first
+        if (token !== attemptPlaybackToken) return; // a later row click superseded this attempt
+        const videoSeekSec = Math.max(0, section.startSec - SECTION_LEADIN_SEC - attempt.startPlaybackSec);
+        attemptVideoEl.currentTime = videoSeekSec;
+        attemptVideoEl.play().catch(() => {});
+      });
+    }
     attemptSectionBreakdownEl.appendChild(li);
   });
 }
@@ -646,8 +670,10 @@ async function renderAttemptsList(songId) {
         attemptPlayerEl.hidden = false;
         attemptSeekBarEl.value = 0;
         attemptCurrentTimeEl.textContent = '0:00';
-        renderSectionBreakdown(attempt.sectionBreakdown);
-        const duration = await fixVideoDuration(attemptVideoEl);
+        renderSectionBreakdown(attempt, token);
+        const readyPromise = fixVideoDuration(attemptVideoEl);
+        attemptVideoReadyPromise = readyPromise;
+        const duration = await readyPromise;
         if (token !== attemptPlaybackToken) return; // a later click already loaded a different attempt
         attemptSeekBarEl.max = duration || 0;
         attemptDurationEl.textContent = formatTime(duration);
@@ -816,7 +842,7 @@ startSingingBtn.addEventListener('click', async () => {
     micStatusEl.textContent = 'Saving attempt…';
 
     if (practiceSession.recorder) {
-      const { recorder, accuracyTracker, attemptStartedAt, songId, toleranceCents, player } = practiceSession;
+      const { recorder, accuracyTracker, attemptStartedAt, attemptStartPlaybackSec, songId, toleranceCents, player } = practiceSession;
       // Captured now, not after the async recorder.stop() below — this is
       // the playback position at the exact moment "Stop Singing" was
       // clicked, which is what "did singing cover the whole song" should
@@ -840,6 +866,7 @@ startSingingBtn.addEventListener('click', async () => {
           accuracyPct: accuracyTracker.getAccuracy(),
           toleranceCents,
           endPlaybackSec,
+          startPlaybackSec: attemptStartPlaybackSec,
           sectionBreakdown,
           videoBlob,
           mimeType: videoBlob.type,
@@ -926,6 +953,11 @@ startSingingBtn.addEventListener('click', async () => {
         });
         practiceSession.recorder.start();
         practiceSession.attemptStartedAt = Date.now();
+        // Song position at the moment the recording actually starts — the
+        // video's own time 0 corresponds to this, not song time 0, since
+        // singing can start partway through (see the section-click seek
+        // math in renderSectionBreakdown).
+        practiceSession.attemptStartPlaybackSec = practiceSession.player.currentTime;
       } catch (err) {
         // The mic is genuinely live at this point — only recording setup
         // failed — so this gets its own message instead of falling into

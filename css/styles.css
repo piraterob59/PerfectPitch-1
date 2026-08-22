@@ -379,6 +379,8 @@ body {
   background: var(--panel);
   font-size: 12px;
 }
+.attempt-section-row.clickable { cursor: pointer; }
+.attempt-section-row.clickable:hover { background: rgba(255, 255, 255, 0.06); }
 .attempt-section-label { color: var(--text-dim); }
 .attempt-section-pct { font-weight: 700; color: var(--good); flex-shrink: 0; }
 .attempt-section-pct.accuracy-low { color: var(--bad); }
