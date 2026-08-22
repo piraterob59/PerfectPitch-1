@@ -564,6 +564,14 @@ function isPartialAttempt(attempt, songSpectrumEndSec) {
 }
 
 async function renderAttemptsList(songId) {
+  // A previous row click (see below) may have moved the player to sit
+  // directly under that row, inside attemptsListEl — move it back to its
+  // original position first, or wiping attemptsListEl below would destroy
+  // it (video element, listeners, playback state) along with whatever row
+  // it's currently nested under. Any full rebuild (collapsing a day,
+  // deleting a different attempt) closes the inline player this way,
+  // rather than trying to re-locate and reopen it under its original row.
+  attemptsListEl.after(attemptPlayerEl);
   const [attempts, pitchTimeline] = await Promise.all([
     store.getAttemptsForSong(songId), // newest first
     store.getPitchTimeline(songId),
@@ -571,6 +579,7 @@ async function renderAttemptsList(songId) {
   attemptsListEl.innerHTML = '';
   attemptsEmptyEl.hidden = attempts.length > 0;
   attemptPlayerEl.hidden = true;
+  attemptVideoEl.pause();
 
   // Where the song's target pitch data actually ends — same voiced-points
   // filter visualizer.js/scoring.js use — not the raw audio's total
@@ -694,6 +703,11 @@ async function renderAttemptsList(songId) {
         if (currentAttemptVideoUrl) URL.revokeObjectURL(currentAttemptVideoUrl);
         currentAttemptVideoUrl = URL.createObjectURL(attempt.videoBlob);
         attemptVideoEl.src = currentAttemptVideoUrl;
+        // Relocates the shared player to sit directly under this row,
+        // rather than always appearing in one fixed spot below the whole
+        // list regardless of which attempt (possibly several days back)
+        // was actually clicked.
+        row.insertAdjacentElement('afterend', attemptPlayerEl);
         attemptPlayerEl.hidden = false;
         attemptSeekBarEl.value = 0;
         attemptCurrentTimeEl.textContent = '0:00';
