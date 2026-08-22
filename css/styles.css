@@ -194,7 +194,9 @@ body {
 
 .mic-status { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
 
-.accuracy-display { color: var(--text); font-size: 15px; font-weight: 600; margin-top: 8px; }
+.accuracy-display { color: var(--good); font-size: 15px; font-weight: 600; margin-top: 8px; }
+.accuracy-display.accuracy-low { color: var(--bad); }
+.accuracy-display.accuracy-mid { color: var(--warn); }
 
 .lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 .lyric-cue-input {

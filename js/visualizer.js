@@ -21,13 +21,6 @@ const RED_BAND_EXTRA_CENTS = 50;
 // point isn't enough, since text has width and the curve can dip lower at
 // the text's edges than it does at the cue's exact timestamp.
 const LYRIC_BAND_HEIGHT = 32;
-// Padding (in semitones) added above/below the visible window's own
-// min/max target pitch, and the smallest total vertical span ever shown
-// even when the visible melody is nearly flat — without a floor, a flat
-// stretch would zoom in so tight the band fills the whole height with no
-// margin and the reference gridlines lose all meaning.
-const VERTICAL_PADDING_SEMITONES = 2;
-const MIN_VERTICAL_RANGE_SEMITONES = 8;
 
 export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
@@ -40,18 +33,12 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
   // counted as a hit. Mutable via setTolerance() for live Settings changes.
   let toleranceGreenCents = toleranceCents;
 
-  // Fallback range shown only before the first real render() call ever
-  // runs (or if a frame's visible window happens to contain zero points) —
-  // render() itself recomputes these from just the currently-visible
-  // window each frame, not the whole song, so the target band always
-  // reads at a legible size regardless of how wide the song's overall
-  // vocal range is.
   let minMidi = 55;
   let maxMidi = 79;
   if (points.length) {
     const midis = points.map((p) => p.midi);
-    minMidi = Math.floor(Math.min(...midis) - VERTICAL_PADDING_SEMITONES);
-    maxMidi = Math.ceil(Math.max(...midis) + VERTICAL_PADDING_SEMITONES);
+    minMidi = Math.floor(Math.min(...midis) - 2);
+    maxMidi = Math.ceil(Math.max(...midis) + 2);
   }
 
   let liveSamples = []; // { timeSec, freqHz, confidence }
@@ -134,28 +121,6 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
     const rangeStart = nowSec - WINDOW_SEC * NOW_FRAC;
     const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
-
-    // Re-centers the vertical range on just what's currently visible each
-    // frame (mirroring how the x-axis already shows a moving window, not
-    // the whole song) — otherwise a song whose melody ranges widely over
-    // its full length would permanently squeeze every moment's target band
-    // into a sliver of the available height. Left unchanged (not reset to
-    // the whole-song fallback) when nothing's in view right now — e.g. a
-    // silence gap mid-window — so the graph doesn't jump on every gap.
-    const visibleMidis = points
-      .filter((p) => p.timeSec >= rangeStart - 0.5 && p.timeSec <= rangeEnd + 0.5)
-      .map((p) => p.midi);
-    if (visibleMidis.length) {
-      let lo = Math.min(...visibleMidis) - VERTICAL_PADDING_SEMITONES;
-      let hi = Math.max(...visibleMidis) + VERTICAL_PADDING_SEMITONES;
-      if (hi - lo < MIN_VERTICAL_RANGE_SEMITONES) {
-        const mid = (lo + hi) / 2;
-        lo = mid - MIN_VERTICAL_RANGE_SEMITONES / 2;
-        hi = mid + MIN_VERTICAL_RANGE_SEMITONES / 2;
-      }
-      minMidi = Math.floor(lo);
-      maxMidi = Math.ceil(hi);
-    }
 
     // Faint reference lines every 2 semitones so the ribbon has legible context.
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';

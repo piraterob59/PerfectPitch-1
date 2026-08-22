@@ -780,6 +780,7 @@ async function openPractice(songId) {
   seekDurationEl.textContent = '0:00';
   accuracyDisplayEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
+  accuracyDisplayEl.className = 'accuracy-display';
   pendingDeleteAttemptId = null;
   if (currentAttemptVideoUrl) { URL.revokeObjectURL(currentAttemptVideoUrl); currentAttemptVideoUrl = null; }
   attemptPlayerEl.hidden = true;
@@ -846,6 +847,11 @@ async function openPractice(songId) {
       const cumulativePct = session.accuracyTracker.getAccuracy();
       const rollingPct = session.accuracyTracker.getRollingAccuracy(player.currentTime);
       accuracyDisplayEl.textContent = formatAccuracyDisplay(cumulativePct, rollingPct);
+      // Colored by the rolling figure, not cumulative — cumulative barely
+      // moves after the first few bars (see formatAccuracyDisplay's
+      // comment), so tying color to it would look frozen; rolling is the
+      // number that actually reflects how the last few seconds went.
+      accuracyDisplayEl.className = `accuracy-display ${accuracyClass(rollingPct)}`;
     }
     session.rafId = requestAnimationFrame(loop);
   }
@@ -1000,6 +1006,7 @@ startSingingBtn.addEventListener('click', async () => {
     practiceSession.accuracyTracker.reset();
     accuracyDisplayEl.hidden = false;
     accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
+    accuracyDisplayEl.className = 'accuracy-display';
 
     practiceSession.micSession = micSession;
     setSingingLayout(true);
@@ -1064,6 +1071,7 @@ resetAttemptBtn.addEventListener('click', () => {
   micStatusEl.textContent = '';
   accuracyDisplayEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
+  accuracyDisplayEl.className = 'accuracy-display';
 
   session.player.pause();
   session.player.seek(0);
