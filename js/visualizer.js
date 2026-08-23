@@ -14,20 +14,66 @@ const LIVE_TRAIL_SEC = 2;
 // red band a finite width to draw — as wide again as yellow's, an
 // arbitrary but proportionate choice rather than a real threshold.
 const RED_BAND_EXTRA_CENTS = 50;
-// Reserved vertical strip at the bottom of the canvas, exclusively for
-// lyric cue text. The ribbon's pitch-to-y mapping is compressed to end
-// above this strip (see midiToY), so the ribbon can never physically enter
-// it no matter how the pitch curves — a fixed offset near each cue's own
-// point isn't enough, since text has width and the curve can dip lower at
-// the text's edges than it does at the cue's exact timestamp.
-const LYRIC_BAND_HEIGHT = 48;
+// Reserved vertical strip at the bottom of the canvas, for section lyric
+// text. The ribbon's pitch-to-y mapping is compressed to end above this
+// strip (see midiToY), so the ribbon can never physically enter it no
+// matter how the pitch curves. Sized for two lines at MAX_SECTION_FONT_PX
+// plus a little padding — see computeSectionLayout for how a section's
+// actual font size is chosen within that budget.
+const LYRIC_BAND_HEIGHT = 92;
+const MAX_SECTION_FONT_PX = 32;
+const MIN_SECTION_FONT_PX = 12;
+const SECTION_LINE_HEIGHT_RATIO = 1.2;
+const SECTION_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, sans-serif';
 
-export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], toleranceCents = 5 }) {
+// Greedy word-wrap: adds words to the current line until one would exceed
+// maxWidthPx, then starts a new line. A single word wider than maxWidthPx
+// still gets its own line (better to overflow slightly than drop text).
+function wrapTextToLines(ctx, text, maxWidthPx) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const attempt = current ? `${current} ${word}` : word;
+    if (!current || ctx.measureText(attempt).width <= maxWidthPx) {
+      current = attempt;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+// Picks the largest font size (within [MIN_SECTION_FONT_PX,
+// MAX_SECTION_FONT_PX]) that wraps `text` into at most 2 lines each fitting
+// maxWidthPx — "as big as possible to fit in no more than two rows", per
+// the actual request this implements. Falls back to the smallest size
+// (however many lines that takes) only in the rare case even that doesn't
+// fit in 2 — very long text in a very short section.
+function fitSectionText(ctx, text, maxWidthPx) {
+  if (!text) return { fontPx: MAX_SECTION_FONT_PX, lines: [] };
+  for (let fontPx = MAX_SECTION_FONT_PX; fontPx >= MIN_SECTION_FONT_PX; fontPx -= 1) {
+    ctx.font = `bold ${fontPx}px ${SECTION_FONT_FAMILY}`;
+    const lines = wrapTextToLines(ctx, text, maxWidthPx);
+    if (lines.length <= 2) return { fontPx, lines };
+  }
+  ctx.font = `bold ${MIN_SECTION_FONT_PX}px ${SECTION_FONT_FAMILY}`;
+  return { fontPx: MIN_SECTION_FONT_PX, lines: wrapTextToLines(ctx, text, maxWidthPx) };
+}
+
+export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
   const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
-  // { timeSec, text } — user-entered (see db.js's lyricCues store), sorted
-  // so render() can scan them in time order alongside the pitch points.
-  const cues = [...lyricCues].sort((a, b) => a.timeSec - b.timeSec);
+  // { id, startSec, endSec, text } — user-marked (see db.js's sections
+  // store), sorted so render() can scan them in order alongside the pitch
+  // points. Each section's best-fit text layout is cached in
+  // sectionLayouts (see computeSectionLayout) rather than recomputed every
+  // render() frame, since it only depends on the section's own duration and
+  // text, not on playback position or scroll.
+  let sectionList = [...sections].sort((a, b) => a.startSec - b.startSec);
+  const sectionLayouts = new Map(); // id -> { fontPx, lines }
   // The Settings tolerance slider's green-band threshold — same value
   // scoring.js uses, so a dot's color always matches whether it actually
   // counted as a hit. Mutable via setTolerance() for live Settings changes.
@@ -43,12 +89,30 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
   let liveSamples = []; // { timeSec, freqHz, confidence }
 
+  // A section's on-screen width is constant regardless of scroll position —
+  // only its x offset moves as it scrolls through the window — since it's
+  // purely a function of its duration and the fixed time-to-pixel scale.
+  // So the best-fit font size only needs recomputing when the section's own
+  // bounds/text change, or the canvas resizes, never per render() frame.
+  function computeSectionLayout(section) {
+    const widthCss = canvasEl.getBoundingClientRect().width;
+    const pxPerSec = widthCss / WINDOW_SEC;
+    // Capped at the canvas's own width: a section longer than WINDOW_SEC is
+    // never fully on-screen at once regardless of font size, so sizing text
+    // to its full duration would just pick a huge font that's mostly
+    // clipped off-canvas at any given moment. Capping means even a long
+    // section gets text sized to actually fit one screenful.
+    const sectionWidthPx = Math.max(10, Math.min((section.endSec - section.startSec) * pxPerSec, widthCss));
+    return fitSectionText(ctx, section.text || '', sectionWidthPx);
+  }
+
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvasEl.getBoundingClientRect();
     canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
     canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (const section of sectionList) sectionLayouts.set(section.id, computeSectionLayout(section));
   }
 
   function midiToY(midi, heightCss) {
@@ -93,24 +157,36 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     liveSamples = [];
   }
 
-  // Inserts a newly-added cue in time order without needing to rebuild the
-  // visualizer, so the "add cue" button in app.js can call this directly.
-  // `id` matches the cue's id in db.js's lyricCues store, so a later
-  // removeLyricCue(id) call can find and drop the right one.
-  function addLyricCue(id, timeSec, text) {
-    const idx = cues.findIndex((c) => c.timeSec > timeSec);
-    const entry = { id, timeSec, text };
-    if (idx === -1) cues.push(entry); else cues.splice(idx, 0, entry);
+  // Inserts a newly-marked section in start-time order without needing to
+  // rebuild the visualizer, so app.js's "Mark Section End" handler can call
+  // this directly right after saving it to the sections store.
+  function addSection(section) {
+    const idx = sectionList.findIndex((s) => s.startSec > section.startSec);
+    if (idx === -1) sectionList.push(section); else sectionList.splice(idx, 0, section);
+    sectionLayouts.set(section.id, computeSectionLayout(section));
   }
 
-  function removeLyricCue(id) {
-    const idx = cues.findIndex((c) => c.id === id);
-    if (idx !== -1) cues.splice(idx, 1);
+  function removeSection(id) {
+    sectionList = sectionList.filter((s) => s.id !== id);
+    sectionLayouts.delete(id);
   }
 
-  function updateLyricCueText(id, text) {
-    const cue = cues.find((c) => c.id === id);
-    if (cue) cue.text = text;
+  function updateSectionText(id, text) {
+    const section = sectionList.find((s) => s.id === id);
+    if (section) {
+      section.text = text;
+      sectionLayouts.set(id, computeSectionLayout(section));
+    }
+  }
+
+  function updateSectionBounds(id, startSec, endSec) {
+    const section = sectionList.find((s) => s.id === id);
+    if (section) {
+      section.startSec = startSec;
+      section.endSec = endSec;
+      sectionList.sort((a, b) => a.startSec - b.startSec);
+      sectionLayouts.set(id, computeSectionLayout(section));
+    }
   }
 
   function render(nowSec) {
@@ -190,26 +266,30 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     ctx.lineTo(nowX, h);
     ctx.stroke();
 
-    // Lyric cues: rendered inside the reserved LYRIC_BAND_HEIGHT strip at
-    // the bottom, horizontally aligned with the moment they occur (same
-    // timeToX as the ribbon) but at a fixed height, not tied to the cue's
-    // pitch — see the LYRIC_BAND_HEIGHT comment for why a pitch-linked
-    // height couldn't reliably avoid overlapping the ribbon.
+    // Section lyric text: shown for a section's entire on-screen span, not
+    // just an instant — unlike the old point-in-time cues this replaced —
+    // sized once per section (see computeSectionLayout) to the largest font
+    // that wraps to <=2 lines within the section's own fixed width, so it
+    // never jitters in size as the section scrolls through the window.
     //
-    // Left-aligned, not centered: with textAlign 'center', a cue's text
-    // straddles its timestamp — so a longer phrase visually starts earlier
-    // (and a short one later) than the timestamp it's actually anchored to,
-    // by however many pixels half its own width happens to be. Left-align
-    // makes the text's leading edge land exactly on timeSec regardless of
-    // its length, so what you see lines up with the number in the cue list.
+    // Left-aligned starting at the section's own start-x, not centered:
+    // the section's width was exactly what the font size was fit to, so
+    // left-aligning keeps every line's leading edge inside that width
+    // rather than needing separate centering math per line.
     ctx.fillStyle = TIER_COLOR.green;
-    ctx.font = 'bold 26px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    for (const cue of cues) {
-      if (cue.timeSec < rangeStart || cue.timeSec > rangeEnd) continue;
-      const x = timeToX(cue.timeSec, nowSec, w);
-      ctx.fillText(cue.text, x, h - 8);
+    ctx.textBaseline = 'top';
+    for (const section of sectionList) {
+      if (section.endSec < rangeStart || section.startSec > rangeEnd) continue;
+      const layout = sectionLayouts.get(section.id);
+      if (!layout || !layout.lines.length) continue;
+      const x = timeToX(section.startSec, nowSec, w);
+      ctx.font = `bold ${layout.fontPx}px ${SECTION_FONT_FAMILY}`;
+      const lineHeight = layout.fontPx * SECTION_LINE_HEIGHT_RATIO;
+      const blockHeight = layout.lines.length * lineHeight;
+      const bandTop = h - LYRIC_BAND_HEIGHT;
+      const startY = bandTop + Math.max(0, (LYRIC_BAND_HEIGHT - blockHeight) / 2);
+      layout.lines.forEach((line, i) => ctx.fillText(line, x, startY + i * lineHeight));
     }
     ctx.textBaseline = 'alphabetic';
 
@@ -238,5 +318,9 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
   resize();
 
-  return { resize, render, pushLiveSample, clearLiveSamples, addLyricCue, removeLyricCue, updateLyricCueText, setTolerance };
+  return {
+    resize, render, pushLiveSample, clearLiveSamples,
+    addSection, removeSection, updateSectionText, updateSectionBounds,
+    setTolerance,
+  };
 }

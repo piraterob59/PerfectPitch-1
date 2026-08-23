@@ -219,19 +219,7 @@ body {
 .section-pending-label { font-size: 12px; color: var(--text-dim); flex-basis: 100%; min-height: 14px; }
 .section-edit-error { font-size: 12px; color: var(--bad); flex-basis: 100%; }
 
-.lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
-.lyric-cue-input {
-  flex: 1;
-  min-width: 0;
-  height: 22px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 14px;
-}
-.lyric-cue-time-input {
+.section-time-input {
   flex: 0 0 58px;
   width: 58px;
   height: 22px;
@@ -243,38 +231,29 @@ body {
   font-size: 14px;
   text-align: center;
 }
-#add-lyric-cue-btn {
-  height: 22px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
 
-.lyric-cue-list {
+.section-list {
   list-style: none;
   margin: 10px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 84px; /* ~2 rows; rest reachable by scrolling, see verification */
+  gap: 8px;
+  max-height: 260px; /* several rows; rest reachable by scrolling */
   overflow-y: auto;
 }
-.lyric-cue-row {
+.section-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
   border-radius: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
 }
-.lyric-cue-row-time { font-size: 12px; color: var(--text-dim); flex-shrink: 0; min-width: 34px; }
-.lyric-cue-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.lyric-cue-row-delete {
+.section-row-header { display: flex; align-items: center; gap: 10px; }
+.section-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.section-row-delete {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -286,9 +265,9 @@ body {
   line-height: 1;
   cursor: pointer;
 }
-.lyric-cue-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }
+.section-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }
 
-.lyric-cue-row-edit {
+.section-row-edit {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -300,11 +279,21 @@ body {
   line-height: 1;
   cursor: pointer;
 }
-.lyric-cue-row-edit:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); }
+.section-row-edit:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); }
 
-.lyric-cue-edit-input {
+.section-edit-input {
   flex: 1;
   min-width: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.section-lyric-input {
+  width: 100%;
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);

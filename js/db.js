@@ -270,7 +270,9 @@ class Store {
   async addSection({ songId, startSec, endSec }) {
     const db = await this.db();
     const t = tx(db, 'sections', 'readwrite');
-    const entry = { id: uuid(), songId, startSec, endSec, createdAt: Date.now() };
+    // Starts with no lyric — filled in afterward via updateSectionText, on
+    // the always-visible text field on the section's own row.
+    const entry = { id: uuid(), songId, startSec, endSec, text: '', createdAt: Date.now() };
     t.objectStore('sections').put(entry);
     return txDone(t, entry);
   }
@@ -291,6 +293,18 @@ class Store {
     if (existing) {
       existing.startSec = startSec;
       existing.endSec = endSec;
+      store.put(existing);
+    }
+    return txDone(t, existing);
+  }
+
+  async updateSectionText(id, text) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readwrite');
+    const store = t.objectStore('sections');
+    const existing = await reqToPromise(store.get(id));
+    if (existing) {
+      existing.text = text;
       store.put(existing);
     }
     return txDone(t, existing);

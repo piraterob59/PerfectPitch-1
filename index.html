@@ -62,20 +62,15 @@
         </div>
         <p id="mic-status" class="mic-status"></p>
         <p id="accuracy-display" class="accuracy-display" hidden>Accuracy: --</p>
-        <p class="panel-label">Sections</p>
-        <div class="section-controls">
-          <button id="mark-section-start-btn" class="btn btn-secondary" type="button">Mark Section Start</button>
-          <button id="mark-section-end-btn" class="btn btn-secondary" type="button" disabled>Mark Section End</button>
-          <span id="section-pending-label" class="section-pending-label"></span>
+        <div id="section-panel">
+          <p class="panel-label">Sections</p>
+          <div class="section-controls">
+            <button id="mark-section-start-btn" class="btn btn-secondary" type="button">Mark Section Start</button>
+            <button id="mark-section-end-btn" class="btn btn-secondary" type="button" disabled>Mark Section End</button>
+            <span id="section-pending-label" class="section-pending-label"></span>
+          </div>
+          <ul id="section-list" class="section-list"></ul>
         </div>
-        <ul id="section-list" class="lyric-cue-list"></ul>
-        <p class="panel-label">Lyric Cues</p>
-        <div id="lyric-cue-controls" class="lyric-cue-controls">
-          <input id="lyric-cue-time-input" type="text" class="lyric-cue-time-input" placeholder="0:00" inputmode="numeric" autocomplete="off" />
-          <input id="lyric-cue-input" type="text" class="lyric-cue-input" placeholder="Word(s) you hear" autocomplete="off" />
-          <button id="add-lyric-cue-btn" class="btn btn-secondary">Add Cue</button>
-        </div>
-        <ul id="lyric-cue-list" class="lyric-cue-list"></ul>
       </div>
     </section>
 

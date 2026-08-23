@@ -258,12 +258,8 @@ const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
-const lyricCueControlsEl = document.getElementById('lyric-cue-controls');
-const lyricCueTimeInput = document.getElementById('lyric-cue-time-input');
-const lyricCueInput = document.getElementById('lyric-cue-input');
-const addLyricCueBtn = document.getElementById('add-lyric-cue-btn');
-const lyricCueListEl = document.getElementById('lyric-cue-list');
 const accuracyDisplayEl = document.getElementById('accuracy-display');
+const sectionPanelEl = document.getElementById('section-panel');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
 const markSectionEndBtn = document.getElementById('mark-section-end-btn');
 const sectionPendingLabelEl = document.getElementById('section-pending-label');
@@ -338,13 +334,6 @@ function parseTimeInput(str) {
   return Number.isFinite(num) ? num : null;
 }
 
-// While the timestamp field has focus, the playback-position auto-sync
-// (see the practice rAF loop) backs off so it doesn't overwrite what the
-// user is actively typing.
-let lyricCueTimeFocused = false;
-lyricCueTimeInput.addEventListener('focus', () => { lyricCueTimeFocused = true; });
-lyricCueTimeInput.addEventListener('blur', () => { lyricCueTimeFocused = false; });
-
 // Chromium's webm muxer often reports a bogus/inflated `duration` for
 // streamed/chunked MediaRecorder output — and critically, the bogus value
 // is a plausible-looking finite number (seen live: ~29s for a real ~4s
@@ -400,74 +389,14 @@ attemptResetBtn.addEventListener('click', () => {
 // place of its normal display row — same pattern as pendingDeleteId for
 // the song list, one row swaps to an editable state rather than opening a
 // separate dialog.
-let editingCueId = null;
-
 // The in-progress section mark: set to a playback position by "Mark Section
 // Start", cleared once "Mark Section End" completes (or a new song opens).
 // Not persisted — a half-marked section is meaningless outside this session.
 let pendingSectionStart = null;
-// Same swap-row-to-editable pattern as editingCueId, for the section list.
+// Swaps a row's boundary display into editable start/end fields, same
+// pattern the old cue list used for its own inline edit — one row at a
+// time, in place, rather than a separate dialog.
 let editingSectionId = null;
-
-async function renderLyricCueList(songId) {
-  const cues = await store.getLyricCuesForSong(songId);
-  lyricCueListEl.innerHTML = '';
-  for (const cue of cues) {
-    const li = document.createElement('li');
-    li.className = 'lyric-cue-row';
-
-    if (editingCueId === cue.id) {
-      li.innerHTML = `
-        <input type="text" class="lyric-cue-edit-input" value="" />
-        <button class="btn btn-secondary lyric-cue-edit-cancel">Cancel</button>
-        <button class="btn btn-primary lyric-cue-edit-save">Save</button>
-      `;
-      const input = li.querySelector('.lyric-cue-edit-input');
-      input.value = cue.text;
-      const save = async () => {
-        const text = input.value.trim();
-        if (text) {
-          await store.updateLyricCueText(cue.id, text);
-          if (practiceSession && practiceSession.songId === songId) {
-            practiceSession.visualizer.updateLyricCueText(cue.id, text);
-          }
-        }
-        editingCueId = null;
-        await renderLyricCueList(songId);
-      };
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') save();
-        if (e.key === 'Escape') { editingCueId = null; renderLyricCueList(songId); }
-      });
-      li.querySelector('.lyric-cue-edit-save').addEventListener('click', save);
-      li.querySelector('.lyric-cue-edit-cancel').addEventListener('click', () => {
-        editingCueId = null;
-        renderLyricCueList(songId);
-      });
-    } else {
-      li.innerHTML = `
-        <span class="lyric-cue-row-time"></span>
-        <span class="lyric-cue-row-text"></span>
-        <button class="lyric-cue-row-edit" aria-label="Edit cue" title="Edit">&#9998;</button>
-        <button class="lyric-cue-row-delete" aria-label="Delete cue" title="Delete">&times;</button>
-      `;
-      li.querySelector('.lyric-cue-row-time').textContent = formatTime(cue.timeSec);
-      li.querySelector('.lyric-cue-row-text').textContent = cue.text;
-      li.querySelector('.lyric-cue-row-edit').addEventListener('click', () => {
-        editingCueId = cue.id;
-        renderLyricCueList(songId);
-      });
-      li.querySelector('.lyric-cue-row-delete').addEventListener('click', async () => {
-        await store.deleteLyricCue(cue.id);
-        if (practiceSession && practiceSession.songId === songId) {
-          practiceSession.visualizer.removeLyricCue(cue.id);
-        }
-        await renderLyricCueList(songId);
-      });
-    }
-    lyricCueListEl.appendChild(li);
-  }
-}
 
 // Sections don't overlap and are sorted by start (enforced at save time
 // below), so "Section N" numbering is just the sorted list's own index —
@@ -477,20 +406,23 @@ async function renderSectionList(songId) {
   sectionListEl.innerHTML = '';
   sections.forEach((section, i) => {
     const li = document.createElement('li');
-    li.className = 'lyric-cue-row';
+    li.className = 'section-row';
+
+    const header = document.createElement('div');
+    header.className = 'section-row-header';
 
     if (editingSectionId === section.id) {
-      li.innerHTML = `
-        <input type="text" class="lyric-cue-time-input section-edit-start" placeholder="0:00" inputmode="numeric" autocomplete="off" />
-        <span class="lyric-cue-row-text">to</span>
-        <input type="text" class="lyric-cue-time-input section-edit-end" placeholder="0:00" inputmode="numeric" autocomplete="off" />
-        <button class="btn btn-secondary lyric-cue-edit-cancel">Cancel</button>
-        <button class="btn btn-primary lyric-cue-edit-save">Save</button>
+      header.innerHTML = `
+        <input type="text" class="section-time-input section-edit-start" placeholder="0:00" inputmode="numeric" autocomplete="off" />
+        <span class="section-row-text">to</span>
+        <input type="text" class="section-time-input section-edit-end" placeholder="0:00" inputmode="numeric" autocomplete="off" />
+        <button class="btn btn-secondary section-edit-cancel">Cancel</button>
+        <button class="btn btn-primary section-edit-save">Save</button>
         <span class="section-edit-error"></span>
       `;
-      const startInput = li.querySelector('.section-edit-start');
-      const endInput = li.querySelector('.section-edit-end');
-      const errorEl = li.querySelector('.section-edit-error');
+      const startInput = header.querySelector('.section-edit-start');
+      const endInput = header.querySelector('.section-edit-end');
+      const errorEl = header.querySelector('.section-edit-error');
       startInput.value = formatTime(section.startSec);
       endInput.value = formatTime(section.endSec);
       const save = async () => {
@@ -504,31 +436,61 @@ async function renderSectionList(songId) {
           return;
         }
         await store.updateSection(section.id, { startSec, endSec });
+        if (practiceSession && practiceSession.songId === songId) {
+          practiceSession.visualizer.updateSectionBounds(section.id, startSec, endSec);
+        }
         editingSectionId = null;
         await renderSectionList(songId);
       };
-      li.querySelector('.lyric-cue-edit-save').addEventListener('click', save);
-      li.querySelector('.lyric-cue-edit-cancel').addEventListener('click', () => {
+      header.querySelector('.section-edit-save').addEventListener('click', save);
+      header.querySelector('.section-edit-cancel').addEventListener('click', () => {
         editingSectionId = null;
         renderSectionList(songId);
       });
     } else {
-      li.innerHTML = `
-        <span class="lyric-cue-row-text"></span>
-        <button class="lyric-cue-row-edit" aria-label="Edit section" title="Edit">&#9998;</button>
-        <button class="lyric-cue-row-delete" aria-label="Delete section" title="Delete">&times;</button>
+      header.innerHTML = `
+        <span class="section-row-text"></span>
+        <button class="section-row-edit" aria-label="Edit section timing" title="Edit timing">&#9998;</button>
+        <button class="section-row-delete" aria-label="Delete section" title="Delete">&times;</button>
       `;
-      li.querySelector('.lyric-cue-row-text').textContent =
+      header.querySelector('.section-row-text').textContent =
         `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
-      li.querySelector('.lyric-cue-row-edit').addEventListener('click', () => {
+      header.querySelector('.section-row-edit').addEventListener('click', () => {
         editingSectionId = section.id;
         renderSectionList(songId);
       });
-      li.querySelector('.lyric-cue-row-delete').addEventListener('click', async () => {
+      header.querySelector('.section-row-delete').addEventListener('click', async () => {
         await store.deleteSection(section.id);
+        if (practiceSession && practiceSession.songId === songId) {
+          practiceSession.visualizer.removeSection(section.id);
+        }
         await renderSectionList(songId);
       });
     }
+    li.appendChild(header);
+
+    // Always visible (not gated behind the timing-edit toggle above) since
+    // typing/tweaking the lyric happens far more often than adjusting a
+    // section's boundaries once they're set.
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.className = 'section-lyric-input';
+    textInput.placeholder = 'Lyric for this section';
+    textInput.autocomplete = 'off';
+    textInput.value = section.text || '';
+    const saveText = async () => {
+      const text = textInput.value.trim();
+      if (text === (section.text || '')) return;
+      section.text = text;
+      await store.updateSectionText(section.id, text);
+      if (practiceSession && practiceSession.songId === songId) {
+        practiceSession.visualizer.updateSectionText(section.id, text);
+      }
+    };
+    textInput.addEventListener('blur', saveText);
+    textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') textInput.blur(); });
+    li.appendChild(textInput);
+
     sectionListEl.appendChild(li);
   });
 }
@@ -554,11 +516,14 @@ markSectionEndBtn.addEventListener('click', async () => {
     sectionPendingLabelEl.textContent = 'That overlaps an existing section — adjust and try again.';
     return;
   }
-  await store.addSection({ songId: session.songId, startSec, endSec });
+  const entry = await store.addSection({ songId: session.songId, startSec, endSec });
   pendingSectionStart = null;
   markSectionEndBtn.disabled = true;
   sectionPendingLabelEl.textContent = '';
-  if (practiceSession === session) await renderSectionList(session.songId);
+  if (practiceSession === session) {
+    practiceSession.visualizer.addSection(entry);
+    await renderSectionList(session.songId);
+  }
 });
 
 // Tracks the attempt (if any) currently showing its inline "delete this?"
@@ -869,7 +834,6 @@ async function openPractice(songId) {
   const song = await store.getSong(songId);
   const instrumentalStem = await store.getStem(songId, 'instrumental');
   const pitchTimeline = await store.getPitchTimeline(songId);
-  const lyricCues = await store.getLyricCuesForSong(songId);
   if (!song || !instrumentalStem) return;
 
   practiceTitleEl.textContent = song.title;
@@ -878,8 +842,6 @@ async function openPractice(songId) {
   startSingingBtn.disabled = false;
   setSingingLayout(false); // ensure a fresh song always opens in the default (not-singing) layout
   micStatusEl.textContent = '';
-  lyricCueInput.value = '';
-  lyricCueTimeInput.value = '0:00';
   seekBarEl.value = 0;
   seekBarEl.max = 0;
   seekCurrentTimeEl.textContent = '0:00';
@@ -907,11 +869,12 @@ async function openPractice(songId) {
   const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
   practiceToleranceEl.textContent = `±${toleranceCents}¢`;
   const player = createPlayer(instrumentalStem.blob);
-  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
   // User-marked verse/phrase boundaries (see the Sections panel's Mark
   // Start/End buttons) — replaced an earlier silence-gap auto-detection
-  // heuristic that proved unreliable in practice.
+  // heuristic that proved unreliable in practice. Each section's own `text`
+  // is what the visualizer renders during playback (see createVisualizer).
   const songSections = await store.getSectionsForSong(songId);
+  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, sections: songSections, toleranceCents });
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents,
@@ -932,7 +895,6 @@ async function openPractice(songId) {
   switchView('practice');
   visualizer.resize();
   await renderSectionList(songId);
-  await renderLyricCueList(songId);
   // Attempts render lazily when "View Attempts" is opened, not here — no
   // point fetching and building that list every time a song is opened.
 
@@ -952,7 +914,6 @@ async function openPractice(songId) {
     visualizer.render(player.currentTime);
     seekBarEl.value = player.currentTime;
     seekCurrentTimeEl.textContent = formatTime(player.currentTime);
-    if (!lyricCueTimeFocused) lyricCueTimeInput.value = formatTime(player.currentTime);
     if (!accuracyDisplayEl.hidden) {
       const cumulativePct = session.accuracyTracker.getAccuracy();
       const rollingPct = session.accuracyTracker.getRollingAccuracy(player.currentTime);
@@ -992,37 +953,14 @@ seekBack1Btn.addEventListener('click', () => stepSeek(-1));
 seekFwd1Btn.addEventListener('click', () => stepSeek(1));
 seekFwd5Btn.addEventListener('click', () => stepSeek(5));
 
-addLyricCueBtn.addEventListener('click', async () => {
-  if (!practiceSession) return;
-  const text = lyricCueInput.value.trim();
-  if (!text) return;
-  // Captured up front so this handler can tell, after the await below,
-  // whether the user navigated away (Back/Library) mid-save — practiceSession
-  // itself may have been replaced or nulled by then.
-  const session = practiceSession;
-  // Reads the editable timestamp field rather than the live playback
-  // position directly — clicking a button always lags slightly behind the
-  // moment you actually heard the word, so the field defaults to "now" but
-  // lets that lag be corrected (or the cue placed anywhere else entirely).
-  const parsed = parseTimeInput(lyricCueTimeInput.value);
-  const timeSec = parsed !== null ? Math.max(0, parsed) : session.player.currentTime;
-  const entry = await store.addLyricCue({ songId: session.songId, timeSec, text });
-  if (practiceSession !== session) return; // torn down or replaced while saving
-  practiceSession.visualizer.addLyricCue(entry.id, timeSec, text);
-  lyricCueInput.value = '';
-  await renderLyricCueList(practiceSession.songId);
-});
-
-// Hides the Add Cue row + lyric cue list while actively singing and grows
-// the pitch graph into the space they free up (see #pitch-canvas.singing),
-// since the dynamic vertical-zoom graph (see visualizer.js) is what you're
-// actually watching while singing, and the extra height gives it more room
-// to read clearly. Shown again (canvas back to its default height) once
-// singing stops, so the cue-adding workflow is unaffected outside of an
-// active take.
+// Hides the Sections panel while actively singing and grows the pitch graph
+// into the space it frees up (see #pitch-canvas.singing), since the graph
+// is what you're actually watching while singing, and the extra height
+// gives it more room to read clearly. Shown again (canvas back to its
+// default height) once singing stops, so marking/editing sections is
+// unaffected outside of an active take.
 function setSingingLayout(isSinging) {
-  lyricCueControlsEl.hidden = isSinging;
-  lyricCueListEl.hidden = isSinging;
+  sectionPanelEl.hidden = isSinging;
   pitchCanvasEl.classList.toggle('singing', isSinging);
   if (practiceSession) practiceSession.visualizer.resize();
 }
