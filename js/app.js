@@ -701,6 +701,25 @@ function isPartialAttempt(attempt, songSpectrumEndSec) {
   return attempt.endPlaybackSec < songSpectrumEndSec - PARTIAL_ATTEMPT_SLACK_SEC;
 }
 
+// "Partial 3-5" — the range of section numbers (1-based, same numbering the
+// breakdown list itself uses) that actually got a scoreable sample,
+// inferred from which entries have a non-null accuracyPct. Falls back to
+// plain "Partial" when there's no section data to derive a range from
+// (song has no sections, or attempt predates sectionBreakdown).
+function partialBadgeText(attempt) {
+  const breakdown = attempt.sectionBreakdown;
+  if (breakdown && breakdown.length) {
+    const attempted = [];
+    breakdown.forEach((s, i) => { if (s.accuracyPct !== null) attempted.push(i + 1); });
+    if (attempted.length) {
+      const first = attempted[0];
+      const last = attempted[attempted.length - 1];
+      return first === last ? `Partial ${first}` : `Partial ${first}-${last}`;
+    }
+  }
+  return 'Partial';
+}
+
 async function renderAttemptsList(songId) {
   // A previous row click (see below) may have moved the player to sit
   // directly under that row, inside attemptsListEl — move it back out
@@ -826,9 +845,10 @@ async function renderAttemptsList(songId) {
           <span class="attempt-row-partial" hidden>Partial</span>
           <span class="attempt-row-tolerance"></span>
           <span class="attempt-row-accuracy"></span>
+          <button class="attempt-row-comment-toggle" type="button" title="Add or view a comment">Comment</button>
           <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
         </div>
-        <input type="text" class="attempt-row-comment-input" placeholder="Add a comment" autocomplete="off" />
+        <input type="text" class="attempt-row-comment-input" placeholder="Add a comment" autocomplete="off" hidden />
       `;
       // Just the time — the day group's own header already carries the date.
       row.querySelector('.attempt-row-datetime').textContent = formatTimeOnly(attempt.startedAt);
@@ -836,7 +856,9 @@ async function renderAttemptsList(songId) {
       // available at all, rather than asserting "not partial" on data we
       // don't actually have — same non-guessing spirit as the tolerance
       // badge above.
-      row.querySelector('.attempt-row-partial').hidden = !isPartialAttempt(attempt, songSpectrumEndSec);
+      const partialEl = row.querySelector('.attempt-row-partial');
+      partialEl.hidden = !isPartialAttempt(attempt, songSpectrumEndSec);
+      partialEl.textContent = partialBadgeText(attempt);
       // Older attempts predate this field and have no stored tolerance —
       // left blank rather than guessing at a value that wasn't actually
       // used to score them.
@@ -845,19 +867,25 @@ async function renderAttemptsList(songId) {
       const accuracyEl = row.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
-      // Always visible, right after the timestamp row — not gated behind an
-      // edit toggle, since jotting a quick note is meant to be as low-
-      // friction as typing directly. Stops the row's own click (which opens
-      // the player) from firing so tapping into the field to type doesn't
-      // also yank focus into a video that starts playing underneath it.
+      // Hidden by default — only the "Comment" button (not the row click,
+      // which opens the player) reveals it, so the list stays compact when
+      // most attempts have nothing noted.
+      const commentToggleBtn = row.querySelector('.attempt-row-comment-toggle');
       const commentInput = row.querySelector('.attempt-row-comment-input');
       commentInput.value = attempt.comment || '';
+      commentToggleBtn.classList.toggle('has-comment', !!attempt.comment);
       const saveComment = async () => {
         const comment = commentInput.value.trim();
         if (comment === (attempt.comment || '')) return;
         attempt.comment = comment;
+        commentToggleBtn.classList.toggle('has-comment', !!comment);
         await store.updateAttemptComment(attempt.id, comment);
       };
+      commentToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        commentInput.hidden = !commentInput.hidden;
+        if (!commentInput.hidden) commentInput.focus();
+      });
       commentInput.addEventListener('click', (e) => e.stopPropagation());
       commentInput.addEventListener('blur', saveComment);
       commentInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commentInput.blur(); });

@@ -248,7 +248,7 @@ class Store {
     const db = await this.db();
     const t = tx(db, 'attempts', 'readwrite');
     // comment starts empty — filled in afterward via updateAttemptComment,
-    // on the always-visible field on the attempt's own row.
+    // from the comment field revealed by the attempt row's toggle button.
     const entry = { id: uuid(), songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, startPlaybackSec, sectionBreakdown, comment: '', videoBlob, mimeType, createdAt: Date.now() };
     t.objectStore('attempts').put(entry);
     return txDone(t, entry);
