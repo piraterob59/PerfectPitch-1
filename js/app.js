@@ -9,7 +9,6 @@ import { createVisualizer } from './visualizer.js';
 import { startMicPitchTracking, getAnalysisLatencySec } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
-import { computeVocalSections } from './note-utils.js';
 
 const TOLERANCE_META_KEY = 'pitchToleranceCents';
 const DEFAULT_TOLERANCE_CENTS = 5;
@@ -802,11 +801,12 @@ async function openPractice(songId) {
   practiceToleranceEl.textContent = `±${toleranceCents}¢`;
   const player = createPlayer(instrumentalStem.blob);
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
-  // Verses/phrases the song's own vocal splits into, separated by a real
-  // silence gap (instrumental break, long pause) — computed once here from
-  // the target timeline, not per-attempt, since it's a property of the
-  // song itself.
-  const songSections = computeVocalSections((pitchTimeline?.points || []).filter((p) => p.freqHz !== null));
+  // Auto-splitting on silence gaps (computeVocalSections) was unreliable in
+  // practice — rolled back in favor of sections the user defines by hand
+  // after import (not built yet). Empty until that lands: the per-section
+  // scoring/breakdown machinery below stays wired up and starts working
+  // again the moment real sections are supplied here.
+  const songSections = [];
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents,
