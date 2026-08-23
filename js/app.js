@@ -927,7 +927,7 @@ async function openPractice(songId) {
 
   practiceTitleEl.textContent = song.title;
   playPauseBtn.textContent = 'Play';
-  startSingingBtn.textContent = 'Start Singing';
+  setStartSingingButtonState(false);
   startSingingBtn.disabled = false;
   setSingingLayout(false); // ensure a fresh song always opens in the default (not-singing) layout
   micStatusEl.textContent = '';
@@ -1061,6 +1061,15 @@ function setSingingLayout(isSinging) {
   if (practiceSession) practiceSession.visualizer.resize();
 }
 
+// White-with-red-outline before a take starts, solid red once one's
+// actively recording — a clearer "recording" signal than the label text
+// alone, and impossible for the two states to drift apart since nothing
+// sets the label without also going through here.
+function setStartSingingButtonState(isSinging) {
+  startSingingBtn.textContent = isSinging ? 'Stop Singing' : 'Start Singing';
+  startSingingBtn.classList.toggle('active', isSinging);
+}
+
 startSingingBtn.addEventListener('click', async () => {
   if (!practiceSession || startSingingBtn.disabled) return;
 
@@ -1068,7 +1077,7 @@ startSingingBtn.addEventListener('click', async () => {
     practiceSession.micSession.stop();
     practiceSession.micSession = null;
     setSingingLayout(false);
-    startSingingBtn.textContent = 'Start Singing';
+    setStartSingingButtonState(false);
     startSingingBtn.disabled = true; // briefly, while the recording finishes flushing
     micStatusEl.textContent = 'Saving attempt…';
 
@@ -1186,7 +1195,7 @@ startSingingBtn.addEventListener('click', async () => {
     practiceSession.player.play();
     playPauseBtn.textContent = 'Pause';
     setSingingLayout(true);
-    startSingingBtn.textContent = 'Stop Singing';
+    setStartSingingButtonState(true);
     micStatusEl.textContent = 'Listening…';
 
     if (isRecordingSupported()) {
@@ -1239,7 +1248,7 @@ function abandonCurrentTakeAndSeek(session, seekSec) {
   session.visualizer.clearLiveSamples();
   setSingingLayout(false);
 
-  startSingingBtn.textContent = 'Start Singing';
+  setStartSingingButtonState(false);
   micStatusEl.textContent = '';
   accuracyDisplayEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);

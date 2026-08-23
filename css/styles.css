@@ -211,15 +211,25 @@ body {
 
 .practice-controls {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   margin-top: 14px;
 }
+/* Smaller than the base .btn sizing, scoped to this row only — up to four
+   buttons (Reset, Redo Attempt, Play, Start Singing) need to fit across one
+   line, including on a narrow phone width. flex: 1 with min-width: 0 lets
+   each share the row equally and actually shrink instead of overflowing;
+   no `display` set here (flex children don't need one), so this can't
+   repeat the [hidden]-specificity bug the previous version of this button
+   had — see that commit for what that looked like when it went wrong. */
+.practice-controls .btn {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 6px;
+  font-size: 13px;
+}
 
-/* :not([hidden]), not a bare selector — a bare `display: block` here would
-   outrank the UA stylesheet's [hidden] { display: none }, since a class
-   selector beats a plain attribute selector, and leave the button visibly
-   showing even while its `hidden` attribute is set. Confirmed live: it did. */
-.redo-last-attempt-btn:not([hidden]) { display: block; width: 100%; margin-top: 8px; }
+.btn-start-singing { background: var(--bg); color: var(--bad); border: 2px solid var(--bad); }
+.btn-start-singing.active { background: var(--bad); color: var(--bg); }
 
 .mic-status { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
 
