@@ -250,10 +250,8 @@ const pitchCanvasEl = document.getElementById('pitch-canvas');
 const seekBarEl = document.getElementById('seek-bar');
 const seekCurrentTimeEl = document.getElementById('seek-current-time');
 const seekDurationEl = document.getElementById('seek-duration');
-const seekBack5Btn = document.getElementById('seek-back-5-btn');
-const seekBack1Btn = document.getElementById('seek-back-1-btn');
-const seekFwd1Btn = document.getElementById('seek-fwd-1-btn');
-const seekFwd5Btn = document.getElementById('seek-fwd-5-btn');
+const seekNudgeBackBtn = document.getElementById('seek-nudge-back-btn');
+const seekNudgeFwdBtn = document.getElementById('seek-nudge-fwd-btn');
 const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
@@ -995,10 +993,12 @@ seekBarEl.addEventListener('input', () => {
   practiceSession.player.seek(parseFloat(seekBarEl.value));
 });
 
-// Step buttons: finer-grained than dragging the slider, where a whole
-// song's duration is squeezed into one drag track — a small delta in finger
-// position covers a large delta in time, so precise placement by dragging
-// alone is hard regardless of the slider's own step size.
+// Nudge buttons flanking the slider: a whole song's duration is squeezed
+// into one drag track, so a small delta in finger position covers a large
+// delta in time — precise placement by dragging alone is hard regardless of
+// the slider's own step size. 0.1s is fine enough to land exactly on a
+// syllable after a rough drag gets you close.
+const SEEK_NUDGE_SEC = 0.1;
 function stepSeek(deltaSec) {
   if (!practiceSession) return;
   const { player } = practiceSession;
@@ -1009,10 +1009,8 @@ function stepSeek(deltaSec) {
   seekBarEl.value = target;
   seekCurrentTimeEl.textContent = formatTime(target);
 }
-seekBack5Btn.addEventListener('click', () => stepSeek(-5));
-seekBack1Btn.addEventListener('click', () => stepSeek(-1));
-seekFwd1Btn.addEventListener('click', () => stepSeek(1));
-seekFwd5Btn.addEventListener('click', () => stepSeek(5));
+seekNudgeBackBtn.addEventListener('click', () => stepSeek(-SEEK_NUDGE_SEC));
+seekNudgeFwdBtn.addEventListener('click', () => stepSeek(SEEK_NUDGE_SEC));
 
 // Hides the Sections panel while actively singing and grows the pitch graph
 // into the space it frees up (see #pitch-canvas.singing), since the graph

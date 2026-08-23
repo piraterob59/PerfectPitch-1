@@ -189,8 +189,22 @@ body {
 
 .seek-bar { flex: 1; }
 
-.seek-step-row { display: flex; gap: 8px; margin-top: 8px; justify-content: center; }
-.seek-step-btn { flex: 1; max-width: 76px; padding: 6px 0; font-size: 13px; }
+.seek-nudge-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.seek-nudge-btn:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); border-color: var(--accent); }
 
 .tolerance-label { display: block; font-size: 14px; margin-top: 16px; margin-bottom: 8px; }
 .tolerance-slider { width: 100%; }
