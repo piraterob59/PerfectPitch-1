@@ -589,6 +589,12 @@ markSectionEndBtn.addEventListener('click', async () => {
 // a text cue, so this uses the same Cancel/Delete confirm pattern as the
 // song list rather than the cue list's immediate delete.
 let pendingDeleteAttemptId = null;
+// The attempt (if any) whose playback window is currently open, so a
+// renderAttemptsList() triggered by something unrelated (collapsing a day
+// group, deleting a *different* attempt) can restore it under its row
+// afterward instead of just leaving it closed — see the end of
+// renderAttemptsList.
+let openAttemptId = null;
 // Which day groups are currently expanded on the Attempts screen (keyed by
 // dayKeyFor's date string) — day groups start collapsed, so this only ever
 // holds days the user has actually opened. Reset whenever "View Attempts"
@@ -696,12 +702,15 @@ function isPartialAttempt(attempt, songSpectrumEndSec) {
 
 async function renderAttemptsList(songId) {
   // A previous row click (see below) may have moved the player to sit
-  // directly under that row, inside attemptsListEl — move it back to its
-  // original position first, or wiping attemptsListEl below would destroy
-  // it (video element, listeners, playback state) along with whatever row
-  // it's currently nested under. Any full rebuild (collapsing a day,
-  // deleting a different attempt) closes the inline player this way,
-  // rather than trying to re-locate and reopen it under its original row.
+  // directly under that row, inside attemptsListEl — move it back out
+  // first, or wiping attemptsListEl below would destroy it (video element,
+  // listeners, playback state) along with whatever row it's currently
+  // nested under. It gets reinserted under its row again at the end of
+  // this function if that attempt is still open (openAttemptId) — a
+  // rebuild triggered by something unrelated (collapsing a day group,
+  // deleting a *different* attempt) shouldn't silently lose an
+  // already-open playback window; only actually deleting the open attempt
+  // itself, or opening a different song, should close it for good.
   attemptsListEl.after(attemptPlayerEl);
   const [attempts, pitchTimeline] = await Promise.all([
     store.getAttemptsForSong(songId), // newest first
@@ -709,8 +718,11 @@ async function renderAttemptsList(songId) {
   ]);
   attemptsListEl.innerHTML = '';
   attemptsEmptyEl.hidden = attempts.length > 0;
-  attemptPlayerEl.hidden = true;
-  attemptVideoEl.pause();
+  // rowsById collects each attempt's row as it's built below, so the open
+  // one (if any) can be found again once the whole list exists — a row's
+  // day group might not even be in the DOM yet at the point its own attempt
+  // is built, so this can't be resolved until after the main loop.
+  const rowsById = new Map();
 
   // Where the song's target pitch data actually ends — same voiced-points
   // filter visualizer.js/scoring.js use — not the raw audio's total
@@ -829,7 +841,9 @@ async function renderAttemptsList(songId) {
       const accuracyEl = row.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
+      rowsById.set(attempt.id, row);
       row.addEventListener('click', async () => {
+        openAttemptId = attempt.id;
         const token = ++attemptPlaybackToken;
         if (currentAttemptVideoUrl) URL.revokeObjectURL(currentAttemptVideoUrl);
         currentAttemptVideoUrl = URL.createObjectURL(attempt.videoBlob);
@@ -861,6 +875,21 @@ async function renderAttemptsList(songId) {
       });
     }
     currentRowsEl.appendChild(row);
+  }
+
+  // Restore the open attempt's player under its (freshly rebuilt) row, so
+  // this rebuild — triggered by collapsing/expanding an unrelated day group,
+  // or deleting a different attempt — doesn't close it. If its row isn't in
+  // the new list at all (the open attempt itself was just deleted), there's
+  // nothing to restore it under, so close it for real instead of leaving it
+  // floating, detached and stale, off in the DOM somewhere.
+  const openRow = openAttemptId ? rowsById.get(openAttemptId) : null;
+  if (openRow) {
+    openRow.insertAdjacentElement('afterend', attemptPlayerEl);
+  } else {
+    openAttemptId = null;
+    attemptPlayerEl.hidden = true;
+    attemptVideoEl.pause();
   }
 }
 
@@ -909,6 +938,7 @@ async function openPractice(songId) {
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
   accuracyDisplayEl.className = 'accuracy-display';
   pendingDeleteAttemptId = null;
+  openAttemptId = null;
   if (currentAttemptVideoUrl) { URL.revokeObjectURL(currentAttemptVideoUrl); currentAttemptVideoUrl = null; }
   attemptPlayerEl.hidden = true;
   attemptVideoEl.pause();
@@ -1222,6 +1252,7 @@ viewAttemptsBtn.addEventListener('click', async () => {
   if (!practiceSession) return;
   attemptsTitleEl.textContent = practiceTitleEl.textContent;
   pendingDeleteAttemptId = null;
+  openAttemptId = null;
   expandedDayKeys = new Set();
   switchView('attempts');
   await renderAttemptsList(practiceSession.songId);
