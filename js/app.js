@@ -867,12 +867,14 @@ async function renderAttemptsList(songId) {
       const accuracyEl = row.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
-      // Hidden by default — only the "Comment" button (not the row click,
-      // which opens the player) reveals it, so the list stays compact when
-      // most attempts have nothing noted.
+      // Hidden by default when there's nothing to show — an existing
+      // comment is shown right away since it's the whole point of noting
+      // it, but an empty attempt stays compact until the "Comment" button
+      // (not the row click, which opens the player) reveals the field.
       const commentToggleBtn = row.querySelector('.attempt-row-comment-toggle');
       const commentInput = row.querySelector('.attempt-row-comment-input');
       commentInput.value = attempt.comment || '';
+      commentInput.hidden = !attempt.comment;
       commentToggleBtn.classList.toggle('has-comment', !!attempt.comment);
       const saveComment = async () => {
         const comment = commentInput.value.trim();
