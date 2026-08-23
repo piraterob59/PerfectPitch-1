@@ -19,7 +19,7 @@ export const DEFAULT_YIN_THRESHOLD = 0.15;
  *   confident periodicity dip was found (unvoiced/noisy).
  */
 export function detectPitchYIN(buffer, sampleRate, {
-  threshold = DEFAULT_YIN_THRESHOLD, minFreq = 70, maxFreq = 1000, silenceRms = 0.01,
+  threshold = DEFAULT_YIN_THRESHOLD, minFreq = 70, maxFreq = 1000, silenceRms = 0.02,
 } = {}) {
   const n = buffer.length;
 

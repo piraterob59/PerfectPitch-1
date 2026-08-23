@@ -26,6 +26,13 @@ export function createAccuracyTracker(pitchTimeline, sections = [], { toleranceC
   // report a final per-section accuracy once singing stops.
   let sectionSums = sections.map(() => 0);
   let sectionCounts = sections.map(() => 0);
+  // Consecutive scoreable frames seen in a row, reset the instant one isn't
+  // — a stray noise/hum blip is almost always isolated, while real singing
+  // holds a note across many frames (~23ms apart, see mic.js's HOP_SIZE), so
+  // requiring a short streak before counting anything filters out the blip
+  // without meaningfully delaying real singing.
+  let voicedStreak = 0;
+  const REQUIRED_VOICED_STREAK = 3;
 
   function setTolerance(cents) {
     tolerance = cents;
@@ -44,14 +51,16 @@ export function createAccuracyTracker(pitchTimeline, sections = [], { toleranceC
   // Silent/unvoiced mic frames (freqHz: null) are skipped rather than
   // counted as misses — gaps between words shouldn't drag the score down.
   function addSample(timeSec, freqHz) {
-    if (freqHz === null) return;
+    if (freqHz === null) { voicedStreak = 0; return; }
     const targetMidi = interpolateTargetMidi(points, timeSec);
-    if (targetMidi === null) return;
+    if (targetMidi === null) { voicedStreak = 0; return; }
     const cents = centsOffPitch(freqHz, targetMidi);
     // Wildly off (see MAX_SCOREABLE_CENTS_OFF) is excluded entirely, not
     // scored as a "red" miss — likely noise/an octave error, not a
     // genuine attempt, so it shouldn't count against the score either way.
-    if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) return;
+    if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) { voicedStreak = 0; return; }
+    voicedStreak++;
+    if (voicedStreak < REQUIRED_VOICED_STREAK) return;
     const score = TIER_SCORE[pitchTier(cents, tolerance)];
     total++;
     sumScore += score;
@@ -101,6 +110,7 @@ export function createAccuracyTracker(pitchTimeline, sections = [], { toleranceC
     recentSamples = [];
     sectionSums = sections.map(() => 0);
     sectionCounts = sections.map(() => 0);
+    voicedStreak = 0;
   }
 
   return { addSample, getAccuracy, getRollingAccuracy, getSectionBreakdown, setTolerance, reset };
