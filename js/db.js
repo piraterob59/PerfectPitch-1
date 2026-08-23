@@ -3,9 +3,9 @@
 // a lazily-opened single connection, and a shared Store singleton.
 
 const DB_NAME = 'perfectpitch';
-const DB_VERSION = 3; // bump this + add an onupgradeneeded branch if the schema ever changes
+const DB_VERSION = 4; // bump this + add an onupgradeneeded branch if the schema ever changes
 
-function openDB() {
+function openDB(onClose) {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
@@ -42,8 +42,29 @@ function openDB() {
         const store = db.createObjectStore('attempts', { keyPath: 'id' });
         store.createIndex('songId', 'songId');
       }
+      if (!db.objectStoreNames.contains('sections')) {
+        // User-marked { songId, startSec, endSec } verse/phrase boundaries —
+        // replaced an earlier silence-gap auto-detection heuristic that
+        // proved unreliable. Feeds scoring.js's per-section accuracy
+        // breakdown on the Attempts screen.
+        const store = db.createObjectStore('sections', { keyPath: 'id' });
+        store.createIndex('songId', 'songId');
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // Without this, a tab left open across a future DB_VERSION bump (e.g.
+      // an old tab still on this page when a new deploy loads elsewhere)
+      // blocks that other tab's upgrade indefinitely — indexedDB.open()
+      // there just hangs with no error, since IndexedDB won't run
+      // onupgradeneeded while any other connection is still open. Closing
+      // on notice lets the other tab proceed; this tab's next DB call
+      // simply reopens.
+      req.result.onversionchange = () => {
+        req.result.close();
+        if (onClose) onClose();
+      };
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -80,7 +101,11 @@ class Store {
   // init()'s renderLibrary() against an early importSong() right after
   // page load) would each open their own separate IndexedDB connection.
   db() {
-    if (!this._dbPromise) this._dbPromise = openDB();
+    // The onClose callback clears the cache when another tab's version
+    // upgrade forces this connection shut (see openDB's onversionchange) —
+    // otherwise every later call here would keep handing out a closed,
+    // unusable connection instead of transparently reopening one.
+    if (!this._dbPromise) this._dbPromise = openDB(() => { this._dbPromise = null; });
     return this._dbPromise;
   }
 
@@ -104,10 +129,10 @@ class Store {
   }
 
   // Deletes a song and cascades to its stems + pitch timeline + lyric cues
-  // + recorded attempts.
+  // + recorded attempts + sections.
   async deleteSong(id) {
     const db = await this.db();
-    const t = tx(db, ['songs', 'stems', 'pitchTimelines', 'lyricCues', 'attempts'], 'readwrite');
+    const t = tx(db, ['songs', 'stems', 'pitchTimelines', 'lyricCues', 'attempts', 'sections'], 'readwrite');
     t.objectStore('songs').delete(id);
     t.objectStore('pitchTimelines').delete(id);
     const range = IDBKeyRange.only(id);
@@ -124,6 +149,7 @@ class Store {
     cascadeBySongId('stems');
     cascadeBySongId('lyricCues');
     cascadeBySongId('attempts');
+    cascadeBySongId('sections');
     return txDone(t);
   }
 
@@ -238,6 +264,42 @@ class Store {
     const db = await this.db();
     const t = tx(db, 'attempts', 'readwrite');
     t.objectStore('attempts').delete(id);
+    return txDone(t);
+  }
+
+  async addSection({ songId, startSec, endSec }) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readwrite');
+    const entry = { id: uuid(), songId, startSec, endSec, createdAt: Date.now() };
+    t.objectStore('sections').put(entry);
+    return txDone(t, entry);
+  }
+
+  async getSectionsForSong(songId) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readonly');
+    const idx = t.objectStore('sections').index('songId');
+    const sections = await reqToPromise(idx.getAll(IDBKeyRange.only(songId)));
+    return sections.sort((a, b) => a.startSec - b.startSec);
+  }
+
+  async updateSection(id, { startSec, endSec }) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readwrite');
+    const store = t.objectStore('sections');
+    const existing = await reqToPromise(store.get(id));
+    if (existing) {
+      existing.startSec = startSec;
+      existing.endSec = endSec;
+      store.put(existing);
+    }
+    return txDone(t, existing);
+  }
+
+  async deleteSection(id) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readwrite');
+    t.objectStore('sections').delete(id);
     return txDone(t);
   }
 }

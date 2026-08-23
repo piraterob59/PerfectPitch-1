@@ -201,6 +201,18 @@ body {
 .accuracy-display.accuracy-low { color: var(--bad); }
 .accuracy-display.accuracy-mid { color: var(--warn); }
 
+.panel-label {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 16px 0 6px;
+}
+.section-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.section-pending-label { font-size: 12px; color: var(--text-dim); flex-basis: 100%; min-height: 14px; }
+.section-edit-error { font-size: 12px; color: var(--bad); flex-basis: 100%; }
+
 .lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 .lyric-cue-input {
   flex: 1;

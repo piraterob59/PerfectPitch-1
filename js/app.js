@@ -264,6 +264,10 @@ const lyricCueInput = document.getElementById('lyric-cue-input');
 const addLyricCueBtn = document.getElementById('add-lyric-cue-btn');
 const lyricCueListEl = document.getElementById('lyric-cue-list');
 const accuracyDisplayEl = document.getElementById('accuracy-display');
+const markSectionStartBtn = document.getElementById('mark-section-start-btn');
+const markSectionEndBtn = document.getElementById('mark-section-end-btn');
+const sectionPendingLabelEl = document.getElementById('section-pending-label');
+const sectionListEl = document.getElementById('section-list');
 const viewAttemptsBtn = document.getElementById('view-attempts-btn');
 const attemptsBackBtn = document.getElementById('attempts-back-btn');
 const attemptsTitleEl = document.getElementById('attempts-title');
@@ -398,6 +402,13 @@ attemptResetBtn.addEventListener('click', () => {
 // separate dialog.
 let editingCueId = null;
 
+// The in-progress section mark: set to a playback position by "Mark Section
+// Start", cleared once "Mark Section End" completes (or a new song opens).
+// Not persisted — a half-marked section is meaningless outside this session.
+let pendingSectionStart = null;
+// Same swap-row-to-editable pattern as editingCueId, for the section list.
+let editingSectionId = null;
+
 async function renderLyricCueList(songId) {
   const cues = await store.getLyricCuesForSong(songId);
   lyricCueListEl.innerHTML = '';
@@ -457,6 +468,98 @@ async function renderLyricCueList(songId) {
     lyricCueListEl.appendChild(li);
   }
 }
+
+// Sections don't overlap and are sorted by start (enforced at save time
+// below), so "Section N" numbering is just the sorted list's own index —
+// no separate ordering field needed.
+async function renderSectionList(songId) {
+  const sections = await store.getSectionsForSong(songId);
+  sectionListEl.innerHTML = '';
+  sections.forEach((section, i) => {
+    const li = document.createElement('li');
+    li.className = 'lyric-cue-row';
+
+    if (editingSectionId === section.id) {
+      li.innerHTML = `
+        <input type="text" class="lyric-cue-time-input section-edit-start" placeholder="0:00" inputmode="numeric" autocomplete="off" />
+        <span class="lyric-cue-row-text">to</span>
+        <input type="text" class="lyric-cue-time-input section-edit-end" placeholder="0:00" inputmode="numeric" autocomplete="off" />
+        <button class="btn btn-secondary lyric-cue-edit-cancel">Cancel</button>
+        <button class="btn btn-primary lyric-cue-edit-save">Save</button>
+        <span class="section-edit-error"></span>
+      `;
+      const startInput = li.querySelector('.section-edit-start');
+      const endInput = li.querySelector('.section-edit-end');
+      const errorEl = li.querySelector('.section-edit-error');
+      startInput.value = formatTime(section.startSec);
+      endInput.value = formatTime(section.endSec);
+      const save = async () => {
+        const startSec = parseTimeInput(startInput.value);
+        const endSec = parseTimeInput(endInput.value);
+        if (startSec === null || endSec === null) { errorEl.textContent = 'Enter valid times.'; return; }
+        if (endSec <= startSec) { errorEl.textContent = 'End must be after start.'; return; }
+        const others = sections.filter((s) => s.id !== section.id);
+        if (others.some((s) => startSec < s.endSec && endSec > s.startSec)) {
+          errorEl.textContent = 'Overlaps another section.';
+          return;
+        }
+        await store.updateSection(section.id, { startSec, endSec });
+        editingSectionId = null;
+        await renderSectionList(songId);
+      };
+      li.querySelector('.lyric-cue-edit-save').addEventListener('click', save);
+      li.querySelector('.lyric-cue-edit-cancel').addEventListener('click', () => {
+        editingSectionId = null;
+        renderSectionList(songId);
+      });
+    } else {
+      li.innerHTML = `
+        <span class="lyric-cue-row-text"></span>
+        <button class="lyric-cue-row-edit" aria-label="Edit section" title="Edit">&#9998;</button>
+        <button class="lyric-cue-row-delete" aria-label="Delete section" title="Delete">&times;</button>
+      `;
+      li.querySelector('.lyric-cue-row-text').textContent =
+        `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
+      li.querySelector('.lyric-cue-row-edit').addEventListener('click', () => {
+        editingSectionId = section.id;
+        renderSectionList(songId);
+      });
+      li.querySelector('.lyric-cue-row-delete').addEventListener('click', async () => {
+        await store.deleteSection(section.id);
+        await renderSectionList(songId);
+      });
+    }
+    sectionListEl.appendChild(li);
+  });
+}
+
+markSectionStartBtn.addEventListener('click', () => {
+  if (!practiceSession) return;
+  pendingSectionStart = practiceSession.player.currentTime;
+  sectionPendingLabelEl.textContent = `Start set at ${formatTime(pendingSectionStart)} — play or step to the end, then Mark Section End.`;
+  markSectionEndBtn.disabled = false;
+});
+
+markSectionEndBtn.addEventListener('click', async () => {
+  if (!practiceSession || pendingSectionStart === null) return;
+  const session = practiceSession;
+  const startSec = pendingSectionStart;
+  const endSec = session.player.currentTime;
+  if (endSec <= startSec) {
+    sectionPendingLabelEl.textContent = `End (${formatTime(endSec)}) must be after start (${formatTime(startSec)}) — play forward, then try again.`;
+    return;
+  }
+  const existing = await store.getSectionsForSong(session.songId);
+  if (existing.some((s) => startSec < s.endSec && endSec > s.startSec)) {
+    sectionPendingLabelEl.textContent = 'That overlaps an existing section — adjust and try again.';
+    return;
+  }
+  await store.addSection({ songId: session.songId, startSec, endSec });
+  pendingSectionStart = null;
+  markSectionEndBtn.disabled = true;
+  sectionPendingLabelEl.textContent = '';
+  if (practiceSession === session) await renderSectionList(session.songId);
+});
 
 // Tracks the attempt (if any) currently showing its inline "delete this?"
 // confirmation — deleting a recording is more consequential than deleting
@@ -796,17 +899,19 @@ async function openPractice(songId) {
   attemptDurationEl.textContent = '0:00';
   attemptPlayPauseBtn.textContent = 'Start';
   attemptSectionBreakdownEl.innerHTML = '';
+  pendingSectionStart = null;
+  editingSectionId = null;
+  markSectionEndBtn.disabled = true;
+  sectionPendingLabelEl.textContent = '';
 
   const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
   practiceToleranceEl.textContent = `±${toleranceCents}¢`;
   const player = createPlayer(instrumentalStem.blob);
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
-  // Auto-splitting on silence gaps (computeVocalSections) was unreliable in
-  // practice — rolled back in favor of sections the user defines by hand
-  // after import (not built yet). Empty until that lands: the per-section
-  // scoring/breakdown machinery below stays wired up and starts working
-  // again the moment real sections are supplied here.
-  const songSections = [];
+  // User-marked verse/phrase boundaries (see the Sections panel's Mark
+  // Start/End buttons) — replaced an earlier silence-gap auto-detection
+  // heuristic that proved unreliable in practice.
+  const songSections = await store.getSectionsForSong(songId);
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents,
@@ -826,6 +931,7 @@ async function openPractice(songId) {
 
   switchView('practice');
   visualizer.resize();
+  await renderSectionList(songId);
   await renderLyricCueList(songId);
   // Attempts render lazily when "View Attempts" is opened, not here — no
   // point fetching and building that list every time a song is opened.
