@@ -123,7 +123,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
 
     // Faint reference lines every 2 semitones so the ribbon has legible context.
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
     ctx.lineWidth = 1;
     for (let m = Math.ceil(minMidi / 2) * 2; m <= maxMidi; m += 2) {
       const y = midiToY(m, h);
@@ -183,7 +183,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     // "now" line — drawn after the (semi-transparent) band so it stays
     // fully bright where it crosses it, not dulled by the fill underneath.
     const nowX = NOW_FRAC * w;
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(nowX, 0);
