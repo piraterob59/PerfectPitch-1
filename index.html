@@ -39,7 +39,10 @@
 
     <section id="view-practice" class="view">
       <div class="practice-panel">
-        <h2><span id="practice-title">Song title</span><span id="practice-tolerance-badge" class="tolerance-badge"></span></h2>
+        <div class="practice-title-row">
+          <h2><span id="practice-title">Song title</span><span id="practice-tolerance-badge" class="tolerance-badge"></span></h2>
+          <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
+        </div>
         <canvas id="pitch-canvas"></canvas>
         <div class="seek-row">
           <span id="seek-current-time" class="seek-time">0:00</span>
@@ -73,8 +76,6 @@
           <button id="add-lyric-cue-btn" class="btn btn-secondary">Add Cue</button>
         </div>
         <ul id="lyric-cue-list" class="lyric-cue-list"></ul>
-
-        <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
       </div>
     </section>
 
