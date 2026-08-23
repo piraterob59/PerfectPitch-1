@@ -3,25 +3,77 @@
 // trailing color-coded line once mic.js is wired in. x maps time linearly;
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
-import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR } from './note-utils.js';
+import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
 
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
 const LIVE_TRAIL_SEC = 2;
-// Reserved vertical strip at the bottom of the canvas, exclusively for
-// lyric cue text. The ribbon's pitch-to-y mapping is compressed to end
-// above this strip (see midiToY), so the ribbon can never physically enter
-// it no matter how the pitch curves — a fixed offset near each cue's own
-// point isn't enough, since text has width and the curve can dip lower at
-// the text's edges than it does at the cue's exact timestamp.
-const LYRIC_BAND_HEIGHT = 32;
+// The yellow/red boundary is fixed at 50 cents (see note-utils.js's
+// pitchTier), same as scoring; red has no such fixed outer edge there
+// (anything beyond 50 cents is just "red", however far), so this gives the
+// red band a finite width to draw — as wide again as yellow's, an
+// arbitrary but proportionate choice rather than a real threshold.
+const RED_BAND_EXTRA_CENTS = 50;
+// Reserved vertical strip at the bottom of the canvas, for section lyric
+// text. The ribbon's pitch-to-y mapping is compressed to end above this
+// strip (see midiToY), so the ribbon can never physically enter it no
+// matter how the pitch curves. Sized for two lines at MAX_SECTION_FONT_PX
+// plus a little padding — see computeSectionLayout for how a section's
+// actual font size is chosen within that budget.
+const LYRIC_BAND_HEIGHT = 92;
+const MAX_SECTION_FONT_PX = 32;
+const MIN_SECTION_FONT_PX = 12;
+const SECTION_LINE_HEIGHT_RATIO = 1.2;
+const SECTION_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, sans-serif';
 
-export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], toleranceCents = 5 }) {
+// Greedy word-wrap: adds words to the current line until one would exceed
+// maxWidthPx, then starts a new line. A single word wider than maxWidthPx
+// still gets its own line (better to overflow slightly than drop text).
+function wrapTextToLines(ctx, text, maxWidthPx) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const attempt = current ? `${current} ${word}` : word;
+    if (!current || ctx.measureText(attempt).width <= maxWidthPx) {
+      current = attempt;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+// Picks the largest font size (within [MIN_SECTION_FONT_PX,
+// MAX_SECTION_FONT_PX]) that wraps `text` into at most 2 lines each fitting
+// maxWidthPx — "as big as possible to fit in no more than two rows", per
+// the actual request this implements. Falls back to the smallest size
+// (however many lines that takes) only in the rare case even that doesn't
+// fit in 2 — very long text in a very short section.
+function fitSectionText(ctx, text, maxWidthPx) {
+  if (!text) return { fontPx: MAX_SECTION_FONT_PX, lines: [] };
+  for (let fontPx = MAX_SECTION_FONT_PX; fontPx >= MIN_SECTION_FONT_PX; fontPx -= 1) {
+    ctx.font = `bold ${fontPx}px ${SECTION_FONT_FAMILY}`;
+    const lines = wrapTextToLines(ctx, text, maxWidthPx);
+    if (lines.length <= 2) return { fontPx, lines };
+  }
+  ctx.font = `bold ${MIN_SECTION_FONT_PX}px ${SECTION_FONT_FAMILY}`;
+  return { fontPx: MIN_SECTION_FONT_PX, lines: wrapTextToLines(ctx, text, maxWidthPx) };
+}
+
+export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
   const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
-  // { timeSec, text } — user-entered (see db.js's lyricCues store), sorted
-  // so render() can scan them in time order alongside the pitch points.
-  const cues = [...lyricCues].sort((a, b) => a.timeSec - b.timeSec);
+  // { id, startSec, endSec, text } — user-marked (see db.js's sections
+  // store), sorted so render() can scan them in order alongside the pitch
+  // points. Each section's best-fit text layout is cached in
+  // sectionLayouts (see computeSectionLayout) rather than recomputed every
+  // render() frame, since it only depends on the section's own duration and
+  // text, not on playback position or scroll.
+  let sectionList = [...sections].sort((a, b) => a.startSec - b.startSec);
+  const sectionLayouts = new Map(); // id -> { fontPx, lines }
   // The Settings tolerance slider's green-band threshold — same value
   // scoring.js uses, so a dot's color always matches whether it actually
   // counted as a hit. Mutable via setTolerance() for live Settings changes.
@@ -37,12 +89,30 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
   let liveSamples = []; // { timeSec, freqHz, confidence }
 
+  // A section's on-screen width is constant regardless of scroll position —
+  // only its x offset moves as it scrolls through the window — since it's
+  // purely a function of its duration and the fixed time-to-pixel scale.
+  // So the best-fit font size only needs recomputing when the section's own
+  // bounds/text change, or the canvas resizes, never per render() frame.
+  function computeSectionLayout(section) {
+    const widthCss = canvasEl.getBoundingClientRect().width;
+    const pxPerSec = widthCss / WINDOW_SEC;
+    // Capped at the canvas's own width: a section longer than WINDOW_SEC is
+    // never fully on-screen at once regardless of font size, so sizing text
+    // to its full duration would just pick a huge font that's mostly
+    // clipped off-canvas at any given moment. Capping means even a long
+    // section gets text sized to actually fit one screenful.
+    const sectionWidthPx = Math.max(10, Math.min((section.endSec - section.startSec) * pxPerSec, widthCss));
+    return fitSectionText(ctx, section.text || '', sectionWidthPx);
+  }
+
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvasEl.getBoundingClientRect();
     canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
     canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (const section of sectionList) sectionLayouts.set(section.id, computeSectionLayout(section));
   }
 
   function midiToY(midi, heightCss) {
@@ -65,6 +135,11 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     return TIER_COLOR[pitchTier(cents, toleranceGreenCents)];
   }
 
+  function hexToRgba(hex, alpha) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+
   function setTolerance(cents) {
     toleranceGreenCents = cents;
   }
@@ -75,24 +150,43 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     while (liveSamples.length && liveSamples[0].timeSec < cutoff) liveSamples.shift();
   }
 
-  // Inserts a newly-added cue in time order without needing to rebuild the
-  // visualizer, so the "add cue" button in app.js can call this directly.
-  // `id` matches the cue's id in db.js's lyricCues store, so a later
-  // removeLyricCue(id) call can find and drop the right one.
-  function addLyricCue(id, timeSec, text) {
-    const idx = cues.findIndex((c) => c.timeSec > timeSec);
-    const entry = { id, timeSec, text };
-    if (idx === -1) cues.push(entry); else cues.splice(idx, 0, entry);
+  // Drops the live pitch trail entirely — used when discarding the current
+  // take (see app.js's Reset button) so old dots don't linger over a
+  // rewound, about-to-restart attempt.
+  function clearLiveSamples() {
+    liveSamples = [];
   }
 
-  function removeLyricCue(id) {
-    const idx = cues.findIndex((c) => c.id === id);
-    if (idx !== -1) cues.splice(idx, 1);
+  // Inserts a newly-marked section in start-time order without needing to
+  // rebuild the visualizer, so app.js's "Mark Section End" handler can call
+  // this directly right after saving it to the sections store.
+  function addSection(section) {
+    const idx = sectionList.findIndex((s) => s.startSec > section.startSec);
+    if (idx === -1) sectionList.push(section); else sectionList.splice(idx, 0, section);
+    sectionLayouts.set(section.id, computeSectionLayout(section));
   }
 
-  function updateLyricCueText(id, text) {
-    const cue = cues.find((c) => c.id === id);
-    if (cue) cue.text = text;
+  function removeSection(id) {
+    sectionList = sectionList.filter((s) => s.id !== id);
+    sectionLayouts.delete(id);
+  }
+
+  function updateSectionText(id, text) {
+    const section = sectionList.find((s) => s.id === id);
+    if (section) {
+      section.text = text;
+      sectionLayouts.set(id, computeSectionLayout(section));
+    }
+  }
+
+  function updateSectionBounds(id, startSec, endSec) {
+    const section = sectionList.find((s) => s.id === id);
+    if (section) {
+      section.startSec = startSec;
+      section.endSec = endSec;
+      sectionList.sort((a, b) => a.startSec - b.startSec);
+      sectionLayouts.set(id, computeSectionLayout(section));
+    }
   }
 
   function render(nowSec) {
@@ -101,8 +195,11 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     const h = rect.height;
     ctx.clearRect(0, 0, w, h);
 
+    const rangeStart = nowSec - WINDOW_SEC * NOW_FRAC;
+    const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
+
     // Faint reference lines every 2 semitones so the ribbon has legible context.
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
     ctx.lineWidth = 1;
     for (let m = Math.ceil(minMidi / 2) * 2; m <= maxMidi; m += 2) {
       const y = midiToY(m, h);
@@ -112,44 +209,87 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
       ctx.stroke();
     }
 
-    // "now" line.
+    // Target pitch band: three nested colored corridors (red outermost,
+    // green innermost) following the target curve, widths driven by the
+    // same tolerance tiers scoring.js grades the live dots against — so
+    // "am I inside the green?" is answerable by eye, not just by the dot
+    // color. Drawn widest-to-narrowest so each narrower fill overpaints the
+    // middle of the one before it, leaving nested bands rather than
+    // stacked-alpha overlap.
+
+    function drawPitchBand(halfWidthSemitones, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      let top = [];
+      let bottom = [];
+      const flushSegment = () => {
+        if (top.length >= 2) {
+          ctx.moveTo(top[0][0], top[0][1]);
+          for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
+          for (let i = bottom.length - 1; i >= 0; i--) ctx.lineTo(bottom[i][0], bottom[i][1]);
+          ctx.closePath();
+        }
+        top = [];
+        bottom = [];
+      };
+      let lastTimeSec = null;
+      for (const p of points) {
+        if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { flushSegment(); lastTimeSec = null; continue; }
+        // A gap this wide is real silence in the target vocal (see
+        // note-utils.js's MAX_INTERPOLATION_GAP_SEC) — break the band here
+        // instead of drawing a straight edge across it, so the band never
+        // implies a target pitch where scoring itself says there isn't one.
+        if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) flushSegment();
+        const x = timeToX(p.timeSec, nowSec, w);
+        top.push([x, midiToY(p.midi + halfWidthSemitones, h)]);
+        bottom.push([x, midiToY(p.midi - halfWidthSemitones, h)]);
+        lastTimeSec = p.timeSec;
+      }
+      flushSegment();
+      ctx.fill();
+    }
+
+    const greenHalfWidth = toleranceGreenCents / 100;
+    const yellowHalfWidth = 50 / 100; // fixed boundary, matches pitchTier()
+    const redHalfWidth = yellowHalfWidth + RED_BAND_EXTRA_CENTS / 100;
+    drawPitchBand(redHalfWidth, hexToRgba(TIER_COLOR.red, 0.35));
+    drawPitchBand(yellowHalfWidth, hexToRgba(TIER_COLOR.yellow, 0.45));
+    drawPitchBand(greenHalfWidth, hexToRgba(TIER_COLOR.green, 0.55));
+
+    // "now" line — drawn after the (semi-transparent) band so it stays
+    // fully bright where it crosses it, not dulled by the fill underneath.
     const nowX = NOW_FRAC * w;
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(nowX, 0);
     ctx.lineTo(nowX, h);
     ctx.stroke();
 
-    // Target pitch ribbon.
-    const rangeStart = nowSec - WINDOW_SEC * NOW_FRAC;
-    const rangeEnd = nowSec + WINDOW_SEC * (1 - NOW_FRAC);
-    ctx.strokeStyle = '#7c3aed';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    let drawing = false;
-    for (const p of points) {
-      if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { drawing = false; continue; }
-      const x = timeToX(p.timeSec, nowSec, w);
-      const y = midiToY(p.midi, h);
-      if (!drawing) { ctx.moveTo(x, y); drawing = true; } else { ctx.lineTo(x, y); }
-    }
-    ctx.stroke();
-
-    // Lyric cues: rendered inside the reserved LYRIC_BAND_HEIGHT strip at
-    // the bottom, horizontally aligned with the moment they occur (same
-    // timeToX as the ribbon) but at a fixed height, not tied to the cue's
-    // pitch — see the LYRIC_BAND_HEIGHT comment for why a pitch-linked
-    // height couldn't reliably avoid overlapping the ribbon.
-    ctx.fillStyle = '#f2f3f5';
-    ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    for (const cue of cues) {
-      if (cue.timeSec < rangeStart || cue.timeSec > rangeEnd) continue;
-      const x = timeToX(cue.timeSec, nowSec, w);
-      ctx.fillText(cue.text, x, h - 8);
+    // Section lyric text: shown for a section's entire on-screen span, not
+    // just an instant — unlike the old point-in-time cues this replaced —
+    // sized once per section (see computeSectionLayout) to the largest font
+    // that wraps to <=2 lines within the section's own fixed width, so it
+    // never jitters in size as the section scrolls through the window.
+    //
+    // Left-aligned starting at the section's own start-x, not centered:
+    // the section's width was exactly what the font size was fit to, so
+    // left-aligning keeps every line's leading edge inside that width
+    // rather than needing separate centering math per line.
+    ctx.fillStyle = TIER_COLOR.green;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    for (const section of sectionList) {
+      if (section.endSec < rangeStart || section.startSec > rangeEnd) continue;
+      const layout = sectionLayouts.get(section.id);
+      if (!layout || !layout.lines.length) continue;
+      const x = timeToX(section.startSec, nowSec, w);
+      ctx.font = `bold ${layout.fontPx}px ${SECTION_FONT_FAMILY}`;
+      const lineHeight = layout.fontPx * SECTION_LINE_HEIGHT_RATIO;
+      const blockHeight = layout.lines.length * lineHeight;
+      const bandTop = h - LYRIC_BAND_HEIGHT;
+      const startY = bandTop + Math.max(0, (LYRIC_BAND_HEIGHT - blockHeight) / 2);
+      layout.lines.forEach((line, i) => ctx.fillText(line, x, startY + i * lineHeight));
     }
     ctx.textBaseline = 'alphabetic';
 
@@ -157,9 +297,18 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
     for (const s of liveSamples) {
       if (s.freqHz === null || s.timeSec < rangeStart) continue;
       const targetMidi = interpolateTargetMidi(s.timeSec);
+      let color = '#9aa1ab';
+      if (targetMidi !== null) {
+        const cents = centsOffPitch(s.freqHz, targetMidi);
+        // Matches scoring.js's own cutoff (see MAX_SCOREABLE_CENTS_OFF) —
+        // a sample this far off isn't scored, so it isn't drawn either,
+        // rather than cluttering the graph with likely noise/octave-error
+        // dots that don't correspond to anything the score reflects.
+        if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) continue;
+        color = liveColorForCents(cents);
+      }
       const x = timeToX(s.timeSec, nowSec, w);
       const y = midiToY(69 + 12 * Math.log2(s.freqHz / 440), h);
-      const color = targetMidi === null ? '#9aa1ab' : liveColorForCents(centsOffPitch(s.freqHz, targetMidi));
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, y, 3.5, 0, Math.PI * 2);
@@ -169,5 +318,9 @@ export function createVisualizer(canvasEl, { pitchTimeline, lyricCues = [], tole
 
   resize();
 
-  return { resize, render, pushLiveSample, addLyricCue, removeLyricCue, updateLyricCueText, setTolerance };
+  return {
+    resize, render, pushLiveSample, clearLiveSamples,
+    addSection, removeSection, updateSectionText, updateSectionBounds,
+    setTolerance,
+  };
 }

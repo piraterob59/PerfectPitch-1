@@ -1,16 +1,16 @@
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --bg: #0b0d10;
-  --panel: #15181d;
-  --text: #f2f3f5;
-  --text-dim: #9aa1ab;
+  --bg: #ffffff;
+  --panel: #f5f5f7;
+  --text: #14161a;
+  --text-dim: #6b7280;
   --accent: #7c3aed;
-  --accent-dim: #4c2a8f;
-  --good: #22c55e;
-  --warn: #eab308;
-  --bad: #ef4444;
-  --border: #262a31;
+  --accent-dim: #ede9fe;
+  --good: #16a34a;
+  --warn: #b45309;
+  --bad: #dc2626;
+  --border: #e2e4e9;
 }
 
 * { box-sizing: border-box; }
@@ -62,6 +62,8 @@ body {
 .btn-primary { background: var(--accent); color: white; }
 .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
 .btn-link { background: none; color: var(--text-dim); padding: 8px; }
+
+.attempts-back-btn { color: var(--good); padding-left: 0; margin-bottom: 8px; }
 
 .library-header { margin-bottom: 16px; }
 
@@ -126,14 +128,28 @@ body {
 
 .error-text { color: var(--bad); margin-top: 12px; }
 
+.tolerance-badge { color: var(--accent); font-size: 14px; font-weight: 600; margin-left: 8px; }
+
+/* flow-root (not overflow:hidden) so the floated button's height is
+   included when sizing this box, without clipping anything that might
+   overflow it — a plain float child wouldn't otherwise contribute to its
+   parent's height at all. */
+.practice-title-heading { display: flow-root; margin: 0; }
+
+#return-to-song-btn { margin-bottom: 8px; padding: 8px 0; }
+
 #pitch-canvas {
   width: 100%;
-  height: 220px;
+  height: 300px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   display: block;
 }
+/* Grows into the space the Add Cue controls/list free up while they're
+   hidden during singing (see app.js's setSingingLayout) — the added
+   height roughly matches that section's own worst-case footprint. */
+#pitch-canvas.singing { height: 430px; }
 
 .seek-row {
   display: flex;
@@ -173,6 +189,23 @@ body {
 
 .seek-bar { flex: 1; }
 
+.seek-nudge-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.seek-nudge-btn:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); border-color: var(--accent); }
+
 .tolerance-label { display: block; font-size: 14px; margin-top: 16px; margin-bottom: 8px; }
 .tolerance-slider { width: 100%; }
 
@@ -184,22 +217,27 @@ body {
 
 .mic-status { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
 
-.accuracy-display { color: var(--text); font-size: 15px; font-weight: 600; margin-top: 8px; }
+.accuracy-display { color: var(--good); font-size: 15px; font-weight: 600; margin-top: 8px; }
+.accuracy-display.accuracy-low { color: var(--bad); }
+.accuracy-display.accuracy-mid { color: var(--warn); }
 
-.lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; }
-.lyric-cue-input {
-  flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 14px;
+.panel-label {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 16px 0 6px;
 }
-.lyric-cue-time-input {
+.section-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.section-pending-label { font-size: 12px; color: var(--text-dim); flex-basis: 100%; min-height: 14px; }
+.section-edit-error { font-size: 12px; color: var(--bad); flex-basis: 100%; }
+
+.section-time-input {
   flex: 0 0 58px;
   width: 58px;
-  padding: 10px 8px;
+  height: 22px;
+  padding: 0 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -208,28 +246,41 @@ body {
   text-align: center;
 }
 
-.lyric-cue-list {
+.section-list {
   list-style: none;
   margin: 10px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 84px; /* ~2 rows; rest reachable by scrolling, see verification */
+  gap: 8px;
+  max-height: 260px; /* several rows; rest reachable by scrolling */
   overflow-y: auto;
 }
-.lyric-cue-row {
+.section-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
   border-radius: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
 }
-.lyric-cue-row-time { font-size: 12px; color: var(--text-dim); flex-shrink: 0; min-width: 34px; }
-.lyric-cue-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.lyric-cue-row-delete {
+.section-row-header { display: flex; align-items: center; gap: 8px; }
+.section-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.section-label-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.section-row-time { flex-shrink: 0; font-size: 12px; color: var(--text-dim); }
+.section-row-delete {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -241,9 +292,9 @@ body {
   line-height: 1;
   cursor: pointer;
 }
-.lyric-cue-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }
+.section-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }
 
-.lyric-cue-row-edit {
+.section-row-edit {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -255,9 +306,9 @@ body {
   line-height: 1;
   cursor: pointer;
 }
-.lyric-cue-row-edit:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); }
+.section-row-edit:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); }
 
-.lyric-cue-edit-input {
+.section-edit-input {
   flex: 1;
   min-width: 0;
   padding: 6px 10px;
@@ -268,10 +319,66 @@ body {
   font-size: 14px;
 }
 
-.attempts-nav-btn { display: block; width: 100%; margin-top: 14px; }
+.section-lyric-row { display: flex; gap: 8px; align-items: center; }
+.section-lyric-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+.section-copy-select {
+  flex-shrink: 0;
+  max-width: 130px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.attempts-nav-btn { float: right; margin: 2px 0 8px 12px; }
 .empty-state-small { color: var(--text-dim); font-size: 13px; margin: 0 0 10px; }
 
-.attempts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.attempts-list { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.attempts-day-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.attempts-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 10px;
+  font: inherit;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.attempts-day-header:hover { background: rgba(0, 0, 0, 0.04); }
+.attempts-day-header-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.attempts-day-header-count { font-size: 12px; flex-shrink: 0; color: #0891b2; }
+.attempts-day-header-best { font-size: 12px; font-weight: 700; color: var(--good); flex: 1; text-align: left; }
+.attempts-day-chevron { font-size: 12px; flex-shrink: 0; }
+.attempts-day-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.attempts-day-rows[hidden] { display: none; }
 .attempt-row {
   display: flex;
   align-items: center;
@@ -283,6 +390,18 @@ body {
   cursor: pointer;
 }
 .attempt-row-datetime { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attempt-row-partial {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--warn);
+  background: rgba(234, 179, 8, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.attempt-row-tolerance { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
 .attempt-row-accuracy { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--good); }
 .attempt-row-accuracy.accuracy-low { color: var(--bad); }
 .attempt-row-accuracy.accuracy-mid { color: var(--warn); }
@@ -303,7 +422,36 @@ body {
 .attempt-player { margin-top: 10px; }
 .attempt-video { width: 100%; border-radius: 12px; display: block; background: #000; }
 .attempt-player .seek-row { margin-top: 8px; }
-.attempt-player .btn { margin-top: 8px; }
+.attempt-player-controls { display: flex; gap: 10px; margin-top: 8px; }
+.attempt-section-breakdown { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.attempt-section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.attempt-section-row.clickable { cursor: pointer; }
+.attempt-section-row.clickable:hover { background: rgba(0, 0, 0, 0.06); }
+.attempt-section-label { color: var(--text-dim); flex: 1; }
+.attempt-section-pct { font-weight: 700; color: var(--good); flex-shrink: 0; }
+.attempt-section-redo-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.attempt-section-redo-btn:hover { background: var(--accent-dim); border-color: var(--accent); }
+.attempt-section-pct.accuracy-low { color: var(--bad); }
+.attempt-section-pct.accuracy-mid { color: var(--warn); }
 
 .settings-note { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-top: 10px; }
 .settings-note code { color: var(--text); }

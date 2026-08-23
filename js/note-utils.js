@@ -43,17 +43,68 @@ export function pitchTier(cents, greenCents) {
 export const TIER_SCORE = { green: 1, yellow: 0.5, red: 0 };
 export const TIER_COLOR = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
 
+// A live sample this far off the target (2 full semitones) is almost never
+// a genuine, if badly missed, singing attempt — far more likely a mic
+// noise spike or an octave-detection error from pitch.js. Distinct from
+// (and well beyond) the tier system above: scoring.js excludes samples
+// past this from the score entirely rather than counting them as a scored
+// "red" miss, and visualizer.js doesn't draw a dot for them at all.
+export const MAX_SCOREABLE_CENTS_OFF = 200;
+
+// Real silence/unvoiced stretches in the target vocal show up as gaps in
+// `points` (freqHz:null entries already filtered out before this is
+// called) — analyze.js hops every ~10ms, so any surviving gap much wider
+// than that is a genuine removed stretch, not just normal hop spacing.
+// Kept well above typical within-word unvoiced-consonant gaps (tens of ms)
+// so interpolation still bridges those, and well below a real instrumental
+// break (seconds), so only actual silence reads as "no target pitch here".
+// Exported (not just used internally below) so visualizer.js's band
+// rendering can break on the same real-silence boundary that scoring and
+// live-dot coloring already respect, instead of drawing a straight edge
+// across a gap that shouldn't have a target pitch at all.
+export const MAX_INTERPOLATION_GAP_SEC = 0.5;
+
 // Finds the target pitch at time t by linearly interpolating between the
 // two nearest points in a pitch timeline's `points` array (voiced points
-// only — filter out freqHz:null entries before calling). Shared by
-// visualizer.js (to color live samples) and scoring.js (to score them),
-// so there's one interpolation implementation, not two that could drift.
+// only — filter out freqHz:null entries before calling). Returns null when
+// t falls in a real silence/unvoiced gap — including before the first or
+// after the last point — so callers don't score or color a live sample
+// against a target pitch that doesn't actually exist at that moment.
+// Shared by visualizer.js (to color live samples) and scoring.js (to score
+// them), so there's one interpolation implementation, not two that could
+// drift.
+// Splits a voiced-points-only timeline (freqHz:null entries already
+// filtered out) into contiguous "sections" — runs of points uninterrupted
+// by a real silence gap (see MAX_INTERPOLATION_GAP_SEC above), e.g. verses
+// or phrases separated by an instrumental break or a long pause. Used to
+// give per-attempt accuracy a meaningful breakdown instead of one
+// whole-song average.
+export function computeVocalSections(voicedPoints) {
+  const sections = [];
+  let startSec = null;
+  let lastTimeSec = null;
+  for (const p of voicedPoints) {
+    if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) {
+      sections.push({ startSec, endSec: lastTimeSec });
+      startSec = null;
+    }
+    if (startSec === null) startSec = p.timeSec;
+    lastTimeSec = p.timeSec;
+  }
+  if (startSec !== null) sections.push({ startSec, endSec: lastTimeSec });
+  return sections;
+}
+
 export function interpolateTargetMidi(points, t) {
   if (!points.length) return null;
   let lo = 0;
   let hi = points.length - 1;
-  if (t <= points[0].timeSec) return points[0].midi;
-  if (t >= points[hi].timeSec) return points[hi].midi;
+  if (t <= points[0].timeSec) {
+    return points[0].timeSec - t <= MAX_INTERPOLATION_GAP_SEC ? points[0].midi : null;
+  }
+  if (t >= points[hi].timeSec) {
+    return t - points[hi].timeSec <= MAX_INTERPOLATION_GAP_SEC ? points[hi].midi : null;
+  }
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
     if (points[mid].timeSec <= t) lo = mid; else hi = mid;
@@ -61,6 +112,7 @@ export function interpolateTargetMidi(points, t) {
   const a = points[lo];
   const b = points[hi];
   const span = b.timeSec - a.timeSec;
+  if (span > MAX_INTERPOLATION_GAP_SEC) return null;
   const frac = span > 0 ? (t - a.timeSec) / span : 0;
   return a.midi + (b.midi - a.midi) * frac;
 }

@@ -39,36 +39,43 @@
 
     <section id="view-practice" class="view">
       <div class="practice-panel">
-        <h2 id="practice-title">Song title</h2>
+        <h2 class="practice-title-heading">
+          <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
+          <span id="practice-title">Song title</span><span id="practice-tolerance-badge" class="tolerance-badge"></span>
+        </h2>
         <canvas id="pitch-canvas"></canvas>
         <div class="seek-row">
           <span id="seek-current-time" class="seek-time">0:00</span>
+          <button id="seek-nudge-back-btn" class="seek-nudge-btn" type="button" aria-label="Back 0.1 second" title="Back 0.1s">&#8249;</button>
           <input id="seek-bar" class="slider seek-bar" type="range" min="0" max="0" step="0.01" value="0" />
+          <button id="seek-nudge-fwd-btn" class="seek-nudge-btn" type="button" aria-label="Forward 0.1 second" title="Forward 0.1s">&#8250;</button>
           <span id="seek-duration" class="seek-time">0:00</span>
         </div>
         <div class="practice-controls">
+          <button id="reset-attempt-btn" class="btn btn-secondary" title="Discard the current take and rewind to the start">Reset</button>
           <button id="play-pause-btn" class="btn btn-secondary">Play</button>
           <button id="start-singing-btn" class="btn btn-primary">Start Singing</button>
         </div>
         <p id="mic-status" class="mic-status"></p>
         <p id="accuracy-display" class="accuracy-display" hidden>Accuracy: --</p>
-        <div class="lyric-cue-controls">
-          <input id="lyric-cue-time-input" type="text" class="lyric-cue-time-input" placeholder="0:00" inputmode="numeric" autocomplete="off" />
-          <input id="lyric-cue-input" type="text" class="lyric-cue-input" placeholder="Word(s) you hear" autocomplete="off" />
-          <button id="add-lyric-cue-btn" class="btn btn-secondary">Add Cue</button>
+        <div id="section-panel">
+          <p class="panel-label">Sections</p>
+          <div class="section-controls">
+            <button id="mark-section-start-btn" class="btn btn-secondary" type="button">Mark Section Start</button>
+            <button id="mark-section-end-btn" class="btn btn-secondary" type="button" disabled>Mark Section End</button>
+            <span id="section-pending-label" class="section-pending-label"></span>
+          </div>
+          <ul id="section-list" class="section-list"></ul>
         </div>
-        <ul id="lyric-cue-list" class="lyric-cue-list"></ul>
-
-        <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
-        <button id="practice-back-btn" class="btn btn-link">Back to library</button>
       </div>
     </section>
 
     <section id="view-attempts" class="view">
       <div class="practice-panel">
         <h2 id="attempts-title">Attempts</h2>
+        <button id="attempts-back-btn" class="btn btn-link attempts-back-btn">Back to song</button>
         <p id="attempts-empty" class="empty-state-small">No recorded attempts yet — tap "Start Singing" to make one.</p>
-        <ul id="attempts-list" class="attempts-list"></ul>
+        <div id="attempts-list" class="attempts-list"></div>
         <div id="attempt-player" class="attempt-player" hidden>
           <video id="attempt-video" class="attempt-video" playsinline></video>
           <div class="seek-row">
@@ -76,16 +83,19 @@
             <input id="attempt-seek-bar" class="slider seek-bar" type="range" min="0" max="0" step="0.01" value="0" />
             <span id="attempt-duration" class="seek-time">0:00</span>
           </div>
-          <button id="attempt-play-pause-btn" class="btn btn-secondary">Play</button>
+          <div class="attempt-player-controls">
+            <button id="attempt-reset-btn" class="btn btn-secondary">Reset</button>
+            <button id="attempt-play-pause-btn" class="btn btn-secondary">Start</button>
+          </div>
+          <ul id="attempt-section-breakdown" class="attempt-section-breakdown"></ul>
         </div>
-
-        <button id="attempts-back-btn" class="btn btn-link">Back to song</button>
       </div>
     </section>
 
     <section id="view-settings" class="view">
       <div class="settings-panel">
         <h2>Settings</h2>
+        <button id="return-to-song-btn" class="btn btn-link" hidden>Return to Song</button>
         <label class="tolerance-label" for="tolerance-slider">
           Pitch accuracy target: <span id="tolerance-value">5</span> cents
         </label>
