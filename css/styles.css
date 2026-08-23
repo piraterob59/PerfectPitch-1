@@ -130,8 +130,11 @@ body {
 
 .tolerance-badge { color: var(--accent); font-size: 14px; font-weight: 600; margin-left: 8px; }
 
-.practice-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.practice-title-row h2 { margin: 0; flex: 0 1 auto; min-width: 0; }
+/* flow-root (not overflow:hidden) so the floated button's height is
+   included when sizing this box, without clipping anything that might
+   overflow it — a plain float child wouldn't otherwise contribute to its
+   parent's height at all. */
+.practice-title-heading { display: flow-root; margin: 0; }
 
 #return-to-song-btn { margin-bottom: 8px; padding: 8px 0; }
 
@@ -310,7 +313,7 @@ body {
   font-size: 14px;
 }
 
-.attempts-nav-btn { flex: 1 1 auto; min-width: 100px; }
+.attempts-nav-btn { float: right; margin: 2px 0 8px 12px; }
 .empty-state-small { color: var(--text-dim); font-size: 13px; margin: 0 0 10px; }
 
 .attempts-list { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
