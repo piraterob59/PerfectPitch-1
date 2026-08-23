@@ -183,6 +183,9 @@ body {
 
 .seek-bar { flex: 1; }
 
+.seek-step-row { display: flex; gap: 8px; margin-top: 8px; justify-content: center; }
+.seek-step-btn { flex: 1; max-width: 76px; padding: 6px 0; font-size: 13px; }
+
 .tolerance-label { display: block; font-size: 14px; margin-top: 16px; margin-bottom: 8px; }
 .tolerance-slider { width: 100%; }
 

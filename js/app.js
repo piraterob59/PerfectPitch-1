@@ -251,6 +251,10 @@ const pitchCanvasEl = document.getElementById('pitch-canvas');
 const seekBarEl = document.getElementById('seek-bar');
 const seekCurrentTimeEl = document.getElementById('seek-current-time');
 const seekDurationEl = document.getElementById('seek-duration');
+const seekBack5Btn = document.getElementById('seek-back-5-btn');
+const seekBack1Btn = document.getElementById('seek-back-1-btn');
+const seekFwd1Btn = document.getElementById('seek-fwd-1-btn');
+const seekFwd5Btn = document.getElementById('seek-fwd-5-btn');
 const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
@@ -862,6 +866,25 @@ seekBarEl.addEventListener('input', () => {
   if (!practiceSession) return;
   practiceSession.player.seek(parseFloat(seekBarEl.value));
 });
+
+// Step buttons: finer-grained than dragging the slider, where a whole
+// song's duration is squeezed into one drag track — a small delta in finger
+// position covers a large delta in time, so precise placement by dragging
+// alone is hard regardless of the slider's own step size.
+function stepSeek(deltaSec) {
+  if (!practiceSession) return;
+  const { player } = practiceSession;
+  const target = Math.max(0, Math.min(player.duration || 0, player.currentTime + deltaSec));
+  player.seek(target);
+  // Reflected immediately rather than waiting for the next rAF tick (see
+  // openPractice's loop()), so the tap feels instant rather than laggy.
+  seekBarEl.value = target;
+  seekCurrentTimeEl.textContent = formatTime(target);
+}
+seekBack5Btn.addEventListener('click', () => stepSeek(-5));
+seekBack1Btn.addEventListener('click', () => stepSeek(-1));
+seekFwd1Btn.addEventListener('click', () => stepSeek(1));
+seekFwd5Btn.addEventListener('click', () => stepSeek(5));
 
 addLyricCueBtn.addEventListener('click', async () => {
   if (!practiceSession) return;
