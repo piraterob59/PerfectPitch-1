@@ -438,6 +438,7 @@ async function renderSectionList(songId) {
         await store.updateSection(section.id, { startSec, endSec });
         if (practiceSession && practiceSession.songId === songId) {
           practiceSession.visualizer.updateSectionBounds(section.id, startSec, endSec);
+          practiceSession.accuracyTracker.updateSectionBounds(section.id, startSec, endSec);
         }
         editingSectionId = null;
         await renderSectionList(songId);
@@ -464,6 +465,9 @@ async function renderSectionList(songId) {
         const label = labelInput.value.trim();
         if (label === (section.label || '')) return;
         await store.updateSectionLabel(section.id, label);
+        if (practiceSession && practiceSession.songId === songId) {
+          practiceSession.accuracyTracker.updateSectionLabel(section.id, label);
+        }
         // Full re-render (safe — this only fires after blur, so nothing is
         // mid-edit) rather than just mutating `section.label` in place:
         // every OTHER row's "Copy from…" dropdown was built from this same
@@ -484,6 +488,7 @@ async function renderSectionList(songId) {
         await store.deleteSection(section.id);
         if (practiceSession && practiceSession.songId === songId) {
           practiceSession.visualizer.removeSection(section.id);
+          practiceSession.accuracyTracker.removeSection(section.id);
         }
         await renderSectionList(songId);
       });
@@ -576,6 +581,7 @@ markSectionEndBtn.addEventListener('click', async () => {
   sectionPendingLabelEl.textContent = '';
   if (practiceSession === session) {
     practiceSession.visualizer.addSection(entry);
+    practiceSession.accuracyTracker.addSection(entry);
     await renderSectionList(session.songId);
   }
 });
@@ -638,8 +644,9 @@ function renderSectionBreakdown(attempt, token) {
       <span class="attempt-section-pct"></span>
       <button type="button" class="attempt-section-redo-btn" title="Redo this section">Redo</button>
     `;
+    const label = section.label || `Section ${i + 1}`;
     li.querySelector('.attempt-section-label').textContent =
-      `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
+      `${label} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
     const pctEl = li.querySelector('.attempt-section-pct');
     pctEl.textContent = section.accuracyPct === null ? '—' : `${section.accuracyPct}%`;
     pctEl.className = `attempt-section-pct ${accuracyClass(section.accuracyPct)}`;
