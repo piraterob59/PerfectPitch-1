@@ -1165,6 +1165,16 @@ startSingingBtn.addEventListener('click', async () => {
     accuracyDisplayEl.className = 'accuracy-display';
 
     practiceSession.micSession = micSession;
+    // Starts playback here too (previously left to a separate manual Play
+    // tap) — most concretely, this is what makes a section Redo from the
+    // Attempts screen actually work as "repeat the attempt": Redo seeks to
+    // the section's lead-in and pauses, and until now the only way to
+    // resume from here was two separate taps (Play, then Start Singing)
+    // instead of one. play() on an already-playing element is a harmless
+    // no-op, so this doesn't change anything for the normal case where
+    // playback was already running.
+    practiceSession.player.play();
+    playPauseBtn.textContent = 'Pause';
     setSingingLayout(true);
     startSingingBtn.textContent = 'Stop Singing';
     micStatusEl.textContent = 'Listening…';
