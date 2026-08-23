@@ -148,10 +148,14 @@ class Store {
     return reqToPromise(idx.getAll(IDBKeyRange.only(songId)));
   }
 
-  async putPitchTimeline(songId, points, hopSec) {
+  // `sections` are the song's vocal verses/phrases (see note-utils.js's
+  // computeVocalSections) — computed once at import time and persisted here
+  // so every later screen (cue assignment, scoring) reads the same split
+  // instead of each recomputing its own.
+  async putPitchTimeline(songId, points, hopSec, sections = []) {
     const db = await this.db();
     const t = tx(db, 'pitchTimelines', 'readwrite');
-    const entry = { songId, hopSec, points, createdAt: Date.now() };
+    const entry = { songId, hopSec, points, sections, createdAt: Date.now() };
     t.objectStore('pitchTimelines').put(entry);
     return txDone(t, entry);
   }
@@ -183,10 +187,14 @@ class Store {
     return txDone(t);
   }
 
-  async addLyricCue({ songId, timeSec, text }) {
+  // `sectionIndex` links a cue back to the song's persisted vocal sections
+  // (see putPitchTimeline) when it was created from the post-import
+  // "Label the sections" screen — null for cues added free-form during
+  // Practice, which aren't tied to any particular section.
+  async addLyricCue({ songId, timeSec, text, sectionIndex = null }) {
     const db = await this.db();
     const t = tx(db, 'lyricCues', 'readwrite');
-    const entry = { id: uuid(), songId, timeSec, text, createdAt: Date.now() };
+    const entry = { id: uuid(), songId, timeSec, text, sectionIndex, createdAt: Date.now() };
     t.objectStore('lyricCues').put(entry);
     return txDone(t, entry);
   }

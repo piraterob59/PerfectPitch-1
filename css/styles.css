@@ -198,6 +198,30 @@ body {
 .accuracy-display.accuracy-low { color: var(--bad); }
 .accuracy-display.accuracy-mid { color: var(--warn); }
 
+.cue-assign-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.cue-assign-row { display: flex; align-items: center; gap: 10px; }
+.cue-assign-label { flex: 0 0 150px; font-size: 13px; color: var(--text-dim); }
+.cue-assign-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+}
+
 .lyric-cue-controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 .lyric-cue-input {
   flex: 1;

@@ -3,6 +3,7 @@
 // mic tracking (see pitch.js's header comment for why that sharing matters).
 
 import { detectPitchYIN } from './pitch.js';
+import { computeVocalSections } from './note-utils.js';
 import { store } from './db.js';
 
 const WINDOW_SIZE = 2048;
@@ -54,7 +55,8 @@ export async function analyzeSongVocals(songId, { onProgress } = {}) {
   const { samples, sampleRate } = await decodeToMono(stem.blob);
   if (onProgress) onProgress(50);
   const { hopSec, points } = analyzeSamples(samples, sampleRate);
-  await store.putPitchTimeline(songId, points, hopSec);
+  const sections = computeVocalSections(points.filter((p) => p.freqHz !== null));
+  await store.putPitchTimeline(songId, points, hopSec, sections);
   if (onProgress) onProgress(100);
-  return { hopSec, points };
+  return { hopSec, points, sections };
 }

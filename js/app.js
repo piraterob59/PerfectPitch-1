@@ -188,6 +188,53 @@ processingBackBtn.addEventListener('click', async () => {
   await renderLibrary();
 });
 
+// --- Cue assignment (post-import) ---
+
+const cueAssignTitleEl = document.getElementById('cue-assign-title');
+const cueAssignCountEl = document.getElementById('cue-assign-count');
+const cueAssignListEl = document.getElementById('cue-assign-list');
+const cueAssignSkipBtn = document.getElementById('cue-assign-skip-btn');
+const cueAssignSaveBtn = document.getElementById('cue-assign-save-btn');
+
+// One-time screen shown right after a song finishes importing: one text
+// field per detected vocal section, saved as a lyric cue timed to that
+// section's start. `.onclick =` (not addEventListener) is deliberate — this
+// screen can be shown again for a different song later in the same page
+// session, and reassigning the property replaces the old handler instead of
+// stacking a second one that would fire alongside it.
+async function showCueAssign(songId, sections) {
+  const song = await store.getSong(songId);
+  if (!song) return;
+  cueAssignTitleEl.textContent = song.title;
+  cueAssignCountEl.textContent = sections.length;
+  cueAssignListEl.innerHTML = '';
+  sections.forEach((section, i) => {
+    const li = document.createElement('li');
+    li.className = 'cue-assign-row';
+    li.innerHTML = `
+      <span class="cue-assign-label"></span>
+      <input type="text" class="cue-assign-input" placeholder="Word(s) you hear" autocomplete="off" />
+    `;
+    li.querySelector('.cue-assign-label').textContent =
+      `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
+    cueAssignListEl.appendChild(li);
+  });
+
+  const finish = () => { openPractice(songId); };
+
+  cueAssignSkipBtn.onclick = finish;
+  cueAssignSaveBtn.onclick = async () => {
+    const inputs = cueAssignListEl.querySelectorAll('.cue-assign-input');
+    for (let i = 0; i < sections.length; i++) {
+      const text = inputs[i].value.trim();
+      if (text) await store.addLyricCue({ songId, timeSec: sections[i].startSec, text, sectionIndex: i });
+    }
+    finish();
+  };
+
+  switchView('cue-assign');
+}
+
 // --- Import ---
 
 importBtn.addEventListener('click', () => importInput.click());
@@ -240,7 +287,19 @@ async function importSong(file) {
   }
   song.updatedAt = Date.now();
   await store.putSong(song);
-  await showProcessing(song.id);
+
+  // On success, skip straight past the static "Ready" screen into labeling
+  // the sections just detected — the whole point of running that detection
+  // at import time (see analyze.js) is to use it immediately, not make the
+  // user re-open the song to discover it happened.
+  if (song.status === 'ready') {
+    const pitchTimeline = await store.getPitchTimeline(song.id);
+    const sections = pitchTimeline?.sections || [];
+    if (sections.length > 0) await showCueAssign(song.id, sections);
+    else await openPractice(song.id);
+  } else {
+    await showProcessing(song.id);
+  }
 }
 
 // --- Practice ---
@@ -799,10 +858,13 @@ async function openPractice(songId) {
   const player = createPlayer(instrumentalStem.blob);
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, lyricCues, toleranceCents });
   // Verses/phrases the song's own vocal splits into, separated by a real
-  // silence gap (instrumental break, long pause) — computed once here from
-  // the target timeline, not per-attempt, since it's a property of the
-  // song itself.
-  const songSections = computeVocalSections((pitchTimeline?.points || []).filter((p) => p.freqHz !== null));
+  // silence gap (instrumental break, long pause) — persisted at import time
+  // (see analyze.js) so this always matches what the "Label the sections"
+  // screen showed; only recomputed here as a fallback for songs imported
+  // before sections were persisted.
+  const songSections = pitchTimeline?.sections?.length
+    ? pitchTimeline.sections
+    : computeVocalSections((pitchTimeline?.points || []).filter((p) => p.freqHz !== null));
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents,
