@@ -215,6 +215,12 @@ body {
   margin-top: 14px;
 }
 
+/* :not([hidden]), not a bare selector — a bare `display: block` here would
+   outrank the UA stylesheet's [hidden] { display: none }, since a class
+   selector beats a plain attribute selector, and leave the button visibly
+   showing even while its `hidden` attribute is set. Confirmed live: it did. */
+.redo-last-attempt-btn:not([hidden]) { display: block; width: 100%; margin-top: 8px; }
+
 .mic-status { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
 
 .accuracy-display { color: var(--good); font-size: 15px; font-weight: 600; margin-top: 8px; }

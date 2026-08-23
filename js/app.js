@@ -253,6 +253,7 @@ const seekDurationEl = document.getElementById('seek-duration');
 const seekNudgeBackBtn = document.getElementById('seek-nudge-back-btn');
 const seekNudgeFwdBtn = document.getElementById('seek-nudge-fwd-btn');
 const resetAttemptBtn = document.getElementById('reset-attempt-btn');
+const redoLastAttemptBtn = document.getElementById('redo-last-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
@@ -937,6 +938,11 @@ async function openPractice(songId) {
   accuracyDisplayEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
   accuracyDisplayEl.className = 'accuracy-display';
+  // Hidden here synchronously (the real answer — does this song have any
+  // attempts yet — isn't known until refreshRedoLastAttemptBtn's fetch
+  // resolves later below) so switching from a song that had attempts to one
+  // that doesn't can't leave it visibly stuck visible for a frame.
+  redoLastAttemptBtn.hidden = true;
   pendingDeleteAttemptId = null;
   openAttemptId = null;
   if (currentAttemptVideoUrl) { URL.revokeObjectURL(currentAttemptVideoUrl); currentAttemptVideoUrl = null; }
@@ -984,6 +990,7 @@ async function openPractice(songId) {
   switchView('practice');
   visualizer.resize();
   await renderSectionList(songId);
+  await refreshRedoLastAttemptBtn(songId);
   // Attempts render lazily when "View Attempts" is opened, not here — no
   // point fetching and building that list every time a song is opened.
 
@@ -1099,7 +1106,10 @@ startSingingBtn.addEventListener('click', async () => {
       practiceSession.pendingSave = savePromise;
       try {
         await savePromise;
-        if (practiceSession && practiceSession.songId === songId) await renderAttemptsList(songId);
+        if (practiceSession && practiceSession.songId === songId) {
+          await renderAttemptsList(songId);
+          await refreshRedoLastAttemptBtn(songId);
+        }
       } catch (err) {
         if (practiceSession) micStatusEl.textContent = `Recording could not be saved: ${err.message || err}`;
       } finally {
@@ -1210,16 +1220,12 @@ startSingingBtn.addEventListener('click', async () => {
   }
 });
 
-resetAttemptBtn.addEventListener('click', () => {
-  // Same guard startSingingBtn's own handler uses — most importantly, it
-  // keeps this from firing during the brief window after "Stop Singing"
-  // where a save is still flushing: accuracyTracker.reset() below would
-  // otherwise zero out the very score that pending save is about to read.
-  if (!practiceSession || startSingingBtn.disabled) return;
-  const session = practiceSession;
-
-  // Discard whatever's currently being recorded/tracked — Reset means
-  // starting over, not saving a partial take.
+// Discards whatever's currently being recorded/tracked and parks playback
+// at seekSec, paused — shared by Reset (seekSec 0) and Redo Last Attempt
+// (seekSec = that attempt's own start) below, since both mean "abandon
+// the current take and get ready to try again from a specific point,"
+// differing only in where that point is.
+function abandonCurrentTakeAndSeek(session, seekSec) {
   if (session.recorder) {
     session.recorder.abort(); // still actively recording: genuinely abandoned
     session.recorder = null;
@@ -1240,10 +1246,41 @@ resetAttemptBtn.addEventListener('click', () => {
   accuracyDisplayEl.className = 'accuracy-display';
 
   session.player.pause();
-  session.player.seek(0);
+  session.player.seek(seekSec);
   playPauseBtn.textContent = 'Play';
-  seekBarEl.value = 0;
-  seekCurrentTimeEl.textContent = '0:00';
+  seekBarEl.value = seekSec;
+  seekCurrentTimeEl.textContent = formatTime(seekSec);
+}
+
+resetAttemptBtn.addEventListener('click', () => {
+  // Same guard startSingingBtn's own handler uses — most importantly, it
+  // keeps this from firing during the brief window after "Stop Singing"
+  // where a save is still flushing: accuracyTracker.reset() below would
+  // otherwise zero out the very score that pending save is about to read.
+  if (!practiceSession || startSingingBtn.disabled) return;
+  abandonCurrentTakeAndSeek(practiceSession, 0);
+});
+
+// Shows/hides the button based on whether this song has any saved attempts
+// yet — meaningless (and left hidden, not just disabled) before the first
+// one exists. Called when a song opens and again right after a new attempt
+// is saved, so it appears without needing to reopen the song.
+async function refreshRedoLastAttemptBtn(songId) {
+  const attempts = await store.getAttemptsForSong(songId);
+  redoLastAttemptBtn.hidden = attempts.length === 0;
+}
+
+redoLastAttemptBtn.addEventListener('click', async () => {
+  if (!practiceSession || startSingingBtn.disabled) return;
+  const session = practiceSession;
+  const attempts = await store.getAttemptsForSong(session.songId); // newest first
+  if (!attempts.length) return;
+  if (practiceSession !== session || startSingingBtn.disabled) return; // torn down or a take started while fetching
+  // Older attempts predate startPlaybackSec — 0 (the song's own start) is
+  // the only sensible fallback, same non-guessing spirit as elsewhere this
+  // field is optional.
+  const seekSec = Math.max(0, attempts[0].startPlaybackSec ?? 0);
+  abandonCurrentTakeAndSeek(session, seekSec);
 });
 
 playPauseBtn.addEventListener('click', () => {
