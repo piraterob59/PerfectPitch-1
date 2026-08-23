@@ -270,9 +270,10 @@ class Store {
   async addSection({ songId, startSec, endSec }) {
     const db = await this.db();
     const t = tx(db, 'sections', 'readwrite');
-    // Starts with no lyric — filled in afterward via updateSectionText, on
-    // the always-visible text field on the section's own row.
-    const entry = { id: uuid(), songId, startSec, endSec, text: '', createdAt: Date.now() };
+    // label/text start empty — filled in afterward via updateSectionLabel/
+    // updateSectionText, on the always-visible fields on the section's own
+    // row. An empty label falls back to a positional "Section N" display.
+    const entry = { id: uuid(), songId, startSec, endSec, label: '', text: '', createdAt: Date.now() };
     t.objectStore('sections').put(entry);
     return txDone(t, entry);
   }
@@ -305,6 +306,18 @@ class Store {
     const existing = await reqToPromise(store.get(id));
     if (existing) {
       existing.text = text;
+      store.put(existing);
+    }
+    return txDone(t, existing);
+  }
+
+  async updateSectionLabel(id, label) {
+    const db = await this.db();
+    const t = tx(db, 'sections', 'readwrite');
+    const store = t.objectStore('sections');
+    const existing = await reqToPromise(store.get(id));
+    if (existing) {
+      existing.label = label;
       store.put(existing);
     }
     return txDone(t, existing);

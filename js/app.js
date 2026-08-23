@@ -449,12 +449,33 @@ async function renderSectionList(songId) {
       });
     } else {
       header.innerHTML = `
-        <span class="section-row-text"></span>
+        <input type="text" class="section-label-input" autocomplete="off" />
+        <span class="section-row-time"></span>
         <button class="section-row-edit" aria-label="Edit section timing" title="Edit timing">&#9998;</button>
         <button class="section-row-delete" aria-label="Delete section" title="Delete">&times;</button>
       `;
-      header.querySelector('.section-row-text').textContent =
-        `Section ${i + 1} (${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
+      const labelInput = header.querySelector('.section-label-input');
+      // Placeholder (not stored) shows the positional fallback name — typing
+      // something replaces it with a real, persisted, position-independent
+      // label (e.g. "Chorus") that survives sections being added before it.
+      labelInput.placeholder = `Section ${i + 1}`;
+      labelInput.value = section.label || '';
+      const saveLabel = async () => {
+        const label = labelInput.value.trim();
+        if (label === (section.label || '')) return;
+        await store.updateSectionLabel(section.id, label);
+        // Full re-render (safe — this only fires after blur, so nothing is
+        // mid-edit) rather than just mutating `section.label` in place:
+        // every OTHER row's "Copy from…" dropdown was built from this same
+        // render's `sections` snapshot, so a stale in-place mutation here
+        // wouldn't reach their already-built <option> text or their still-
+        // stale copy of this section's text.
+        await renderSectionList(songId);
+      };
+      labelInput.addEventListener('blur', saveLabel);
+      labelInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') labelInput.blur(); });
+      header.querySelector('.section-row-time').textContent =
+        `(${formatTime(section.startSec)}–${formatTime(section.endSec)})`;
       header.querySelector('.section-row-edit').addEventListener('click', () => {
         editingSectionId = section.id;
         renderSectionList(songId);
@@ -472,24 +493,57 @@ async function renderSectionList(songId) {
     // Always visible (not gated behind the timing-edit toggle above) since
     // typing/tweaking the lyric happens far more often than adjusting a
     // section's boundaries once they're set.
-    const textInput = document.createElement('input');
-    textInput.type = 'text';
-    textInput.className = 'section-lyric-input';
-    textInput.placeholder = 'Lyric for this section';
-    textInput.autocomplete = 'off';
+    const lyricRow = document.createElement('div');
+    lyricRow.className = 'section-lyric-row';
+    lyricRow.innerHTML = `
+      <input type="text" class="section-lyric-input" placeholder="Lyric for this section" autocomplete="off" />
+      <select class="section-copy-select" aria-label="Copy lyric from another section"></select>
+    `;
+    const textInput = lyricRow.querySelector('.section-lyric-input');
     textInput.value = section.text || '';
-    const saveText = async () => {
-      const text = textInput.value.trim();
+    const saveText = async (text) => {
       if (text === (section.text || '')) return;
-      section.text = text;
       await store.updateSectionText(section.id, text);
       if (practiceSession && practiceSession.songId === songId) {
         practiceSession.visualizer.updateSectionText(section.id, text);
       }
+      // Same reasoning as saveLabel's full re-render: other rows' copy
+      // dropdowns would otherwise keep offering this section's pre-edit
+      // text (or pre-rename label) until something else happened to
+      // trigger a rebuild.
+      await renderSectionList(songId);
     };
-    textInput.addEventListener('blur', saveText);
+    textInput.addEventListener('blur', () => saveText(textInput.value.trim()));
     textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') textInput.blur(); });
-    li.appendChild(textInput);
+
+    // Reuses an already-typed lyric on another section (e.g. a repeated
+    // chorus) instead of retyping it — copies that section's current text
+    // in immediately, no confirmation, same low-friction editing as typing
+    // it directly (retyping is just as easy an "undo" as anything else here).
+    const copySelect = lyricRow.querySelector('.section-copy-select');
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = 'Copy from…';
+    placeholderOpt.disabled = true;
+    placeholderOpt.selected = true;
+    copySelect.appendChild(placeholderOpt);
+    sections.forEach((other, otherIndex) => {
+      if (other.id === section.id) return;
+      const opt = document.createElement('option');
+      opt.value = other.id;
+      const otherLabel = other.label || `Section ${otherIndex + 1}`;
+      opt.textContent = `${otherLabel} (${formatTime(other.startSec)}–${formatTime(other.endSec)})`;
+      copySelect.appendChild(opt);
+    });
+    copySelect.addEventListener('change', async () => {
+      const sourceId = copySelect.value;
+      copySelect.value = '';
+      if (!sourceId) return;
+      const source = sections.find((s) => s.id === sourceId);
+      if (source) await saveText(source.text || '');
+    });
+
+    li.appendChild(lyricRow);
 
     sectionListEl.appendChild(li);
   });
