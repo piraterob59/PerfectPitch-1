@@ -821,11 +821,14 @@ async function renderAttemptsList(songId) {
       });
     } else {
       row.innerHTML = `
-        <span class="attempt-row-datetime"></span>
-        <span class="attempt-row-partial" hidden>Partial</span>
-        <span class="attempt-row-tolerance"></span>
-        <span class="attempt-row-accuracy"></span>
-        <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
+        <div class="attempt-row-header">
+          <span class="attempt-row-datetime"></span>
+          <span class="attempt-row-partial" hidden>Partial</span>
+          <span class="attempt-row-tolerance"></span>
+          <span class="attempt-row-accuracy"></span>
+          <button class="attempt-row-delete" aria-label="Delete attempt" title="Delete">&times;</button>
+        </div>
+        <input type="text" class="attempt-row-comment-input" placeholder="Add a comment" autocomplete="off" />
       `;
       // Just the time — the day group's own header already carries the date.
       row.querySelector('.attempt-row-datetime').textContent = formatTimeOnly(attempt.startedAt);
@@ -842,6 +845,22 @@ async function renderAttemptsList(songId) {
       const accuracyEl = row.querySelector('.attempt-row-accuracy');
       accuracyEl.textContent = attempt.accuracyPct === null ? '—' : `${attempt.accuracyPct}%`;
       accuracyEl.className = `attempt-row-accuracy ${accuracyClass(attempt.accuracyPct)}`;
+      // Always visible, right after the timestamp row — not gated behind an
+      // edit toggle, since jotting a quick note is meant to be as low-
+      // friction as typing directly. Stops the row's own click (which opens
+      // the player) from firing so tapping into the field to type doesn't
+      // also yank focus into a video that starts playing underneath it.
+      const commentInput = row.querySelector('.attempt-row-comment-input');
+      commentInput.value = attempt.comment || '';
+      const saveComment = async () => {
+        const comment = commentInput.value.trim();
+        if (comment === (attempt.comment || '')) return;
+        attempt.comment = comment;
+        await store.updateAttemptComment(attempt.id, comment);
+      };
+      commentInput.addEventListener('click', (e) => e.stopPropagation());
+      commentInput.addEventListener('blur', saveComment);
+      commentInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commentInput.blur(); });
       rowsById.set(attempt.id, row);
       row.addEventListener('click', async () => {
         openAttemptId = attempt.id;

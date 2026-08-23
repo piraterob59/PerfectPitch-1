@@ -247,7 +247,9 @@ class Store {
   async addAttempt({ songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, startPlaybackSec, sectionBreakdown, videoBlob, mimeType }) {
     const db = await this.db();
     const t = tx(db, 'attempts', 'readwrite');
-    const entry = { id: uuid(), songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, startPlaybackSec, sectionBreakdown, videoBlob, mimeType, createdAt: Date.now() };
+    // comment starts empty — filled in afterward via updateAttemptComment,
+    // on the always-visible field on the attempt's own row.
+    const entry = { id: uuid(), songId, startedAt, durationSec, accuracyPct, toleranceCents, endPlaybackSec, startPlaybackSec, sectionBreakdown, comment: '', videoBlob, mimeType, createdAt: Date.now() };
     t.objectStore('attempts').put(entry);
     return txDone(t, entry);
   }
@@ -265,6 +267,18 @@ class Store {
     const t = tx(db, 'attempts', 'readwrite');
     t.objectStore('attempts').delete(id);
     return txDone(t);
+  }
+
+  async updateAttemptComment(id, comment) {
+    const db = await this.db();
+    const t = tx(db, 'attempts', 'readwrite');
+    const store = t.objectStore('attempts');
+    const existing = await reqToPromise(store.get(id));
+    if (existing) {
+      existing.comment = comment;
+      store.put(existing);
+    }
+    return txDone(t, existing);
   }
 
   async addSection({ songId, startSec, endSec }) {

@@ -397,13 +397,24 @@ body {
 .attempts-day-rows[hidden] { display: none; }
 .attempt-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
   cursor: pointer;
+}
+.attempt-row-header { display: flex; align-items: center; gap: 10px; }
+.attempt-row-comment-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: text;
 }
 .attempt-row-datetime { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attempt-row-partial {
