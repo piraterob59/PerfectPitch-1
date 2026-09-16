@@ -85,7 +85,8 @@ body {
 .song-row-status.status-ready { color: var(--good); }
 .song-row-status.status-failed { color: var(--bad); }
 
-.song-row-delete {
+.song-row-delete,
+.song-row-reanalyze {
   flex-shrink: 0;
   width: 26px;
   height: 26px;
@@ -98,6 +99,7 @@ body {
   cursor: pointer;
 }
 .song-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }
+.song-row-reanalyze:hover { background: rgba(124, 58, 237, 0.15); color: var(--accent); }
 
 .song-row-confirm-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .song-row-confirm-cancel,

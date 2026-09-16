@@ -140,11 +140,36 @@ async function renderLibrary() {
       li.innerHTML = `
         <span class="song-row-title"></span>
         <span class="song-row-status status-${song.status}"></span>
+        ${song.status === 'ready' ? '<button class="song-row-reanalyze" aria-label="Re-analyze pitch" title="Re-analyze pitch">&#8635;</button>' : ''}
         <button class="song-row-delete" aria-label="Delete song" title="Delete">&times;</button>
       `;
       li.querySelector('.song-row-title').textContent = song.title;
       li.querySelector('.song-row-status').textContent = STATUS_LABELS[song.status] || song.status;
       li.addEventListener('click', () => openSong(song.id));
+      // Re-runs pitch analysis against the already-stored vocals stem —
+      // no LALAL.AI re-separation, so tuning the analyzer (pitch.js,
+      // analyze.js) doesn't cost a re-import to see the result on a song
+      // already in the library. Only shown once a song is 'ready', since
+      // that's the only state guaranteed to have both a stem and a prior
+      // timeline.
+      li.querySelector('.song-row-reanalyze')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        song.status = 'analyzing';
+        await store.putSong(song);
+        await showProcessing(song.id);
+        try {
+          await analyzeSongVocals(song.id, {
+            onProgress: (pct) => { processingBarEl.style.width = `${pct}%`; },
+          });
+          song.status = 'ready';
+        } catch (err) {
+          song.status = 'failed';
+          song.errorMessage = err.message || String(err);
+        }
+        song.updatedAt = Date.now();
+        await store.putSong(song);
+        await showProcessing(song.id);
+      });
       li.querySelector('.song-row-delete').addEventListener('click', (e) => {
         e.stopPropagation(); // don't also trigger the row's openSong click
         pendingDeleteId = song.id;

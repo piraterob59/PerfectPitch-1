@@ -4,6 +4,7 @@
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
 import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
+import { OFFLINE_SECONDARY_YIN_THRESHOLD } from './pitch.js';
 
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
@@ -21,6 +22,29 @@ const RED_BAND_EXTRA_CENTS = 50;
 // plus a little padding — see computeSectionLayout for how a section's
 // actual font size is chosen within that budget.
 const LYRIC_BAND_HEIGHT = 92;
+// The offline analyzer's YIN detector accepts a point down to
+// OFFLINE_SECONDARY_YIN_THRESHOLD (see pitch.js) when nothing clears its
+// stricter primary threshold — a harmony/backing vocal sharing the frame
+// with the lead is exactly when that fallback kicks in — so no accepted
+// point's confidence (1 - dip) ever falls below this floor. A genuinely
+// solo, clean vocal frame sits near the top of this [floor, 1] band; a
+// frame only the secondary threshold rescued sits at the bottom. Mapped to
+// alpha below so the target band visibly dims exactly where the reference
+// pitch is least trustworthy, instead of either drawing every accepted
+// frame at equal, unearned confidence, or dropping it as a gap.
+const CONFIDENCE_FLOOR = 1 - OFFLINE_SECONDARY_YIN_THRESHOLD;
+const CONFIDENCE_DIM_ALPHA_SCALE = 0.3; // fill alpha at the confidence floor, as a fraction of full
+// Quantizing into a handful of alpha steps groups nearby-confidence frames
+// into one fill() path instead of one per ~10ms point — real audio's
+// confidence is locally correlated, so this keeps the per-frame canvas cost
+// low (a few dozen fills per band, not hundreds) while still tracking real
+// swings in how trustworthy the target pitch is.
+const CONFIDENCE_ALPHA_STEPS = 6;
+
+function confidenceAlphaScale(confidence) {
+  const norm = Math.max(0, Math.min(1, ((confidence ?? 1) - CONFIDENCE_FLOOR) / (1 - CONFIDENCE_FLOOR)));
+  return CONFIDENCE_DIM_ALPHA_SCALE + norm * (1 - CONFIDENCE_DIM_ALPHA_SCALE);
+}
 const MAX_SECTION_FONT_PX = 32;
 const MIN_SECTION_FONT_PX = 12;
 const SECTION_LINE_HEIGHT_RATIO = 1.2;
@@ -217,44 +241,62 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
     // middle of the one before it, leaving nested bands rather than
     // stacked-alpha overlap.
 
-    function drawPitchBand(halfWidthSemitones, color) {
-      ctx.fillStyle = color;
-      ctx.beginPath();
+    function drawPitchBand(halfWidthSemitones, colorHex, baseAlpha) {
       let top = [];
       let bottom = [];
+      let segmentBucket = null;
       const flushSegment = () => {
         if (top.length >= 2) {
+          ctx.beginPath();
           ctx.moveTo(top[0][0], top[0][1]);
           for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
           for (let i = bottom.length - 1; i >= 0; i--) ctx.lineTo(bottom[i][0], bottom[i][1]);
           ctx.closePath();
+          ctx.fillStyle = hexToRgba(colorHex, baseAlpha * (segmentBucket / CONFIDENCE_ALPHA_STEPS));
+          ctx.fill();
         }
-        top = [];
-        bottom = [];
       };
       let lastTimeSec = null;
       for (const p of points) {
-        if (p.timeSec < rangeStart - 0.5 || p.timeSec > rangeEnd + 0.5) { flushSegment(); lastTimeSec = null; continue; }
+        const inRange = p.timeSec >= rangeStart - 0.5 && p.timeSec <= rangeEnd + 0.5;
         // A gap this wide is real silence in the target vocal (see
         // note-utils.js's MAX_INTERPOLATION_GAP_SEC) — break the band here
         // instead of drawing a straight edge across it, so the band never
         // implies a target pitch where scoring itself says there isn't one.
-        if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) flushSegment();
+        const isGap = lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC;
+        if (!inRange || isGap) {
+          flushSegment();
+          top = [];
+          bottom = [];
+          segmentBucket = null;
+          lastTimeSec = null;
+          if (!inRange) continue;
+        }
+        const bucket = Math.round(confidenceAlphaScale(p.confidence) * CONFIDENCE_ALPHA_STEPS);
+        if (segmentBucket !== null && bucket !== segmentBucket) {
+          // Close out the previous run, then re-seed the new one with the
+          // shared boundary point so adjacent alpha segments share an edge
+          // exactly, instead of leaving a hairline gap where the fill
+          // alpha steps.
+          flushSegment();
+          top = [top[top.length - 1]];
+          bottom = [bottom[bottom.length - 1]];
+        }
+        segmentBucket = bucket;
         const x = timeToX(p.timeSec, nowSec, w);
         top.push([x, midiToY(p.midi + halfWidthSemitones, h)]);
         bottom.push([x, midiToY(p.midi - halfWidthSemitones, h)]);
         lastTimeSec = p.timeSec;
       }
       flushSegment();
-      ctx.fill();
     }
 
     const greenHalfWidth = toleranceGreenCents / 100;
     const yellowHalfWidth = 50 / 100; // fixed boundary, matches pitchTier()
     const redHalfWidth = yellowHalfWidth + RED_BAND_EXTRA_CENTS / 100;
-    drawPitchBand(redHalfWidth, hexToRgba(TIER_COLOR.red, 0.35));
-    drawPitchBand(yellowHalfWidth, hexToRgba(TIER_COLOR.yellow, 0.45));
-    drawPitchBand(greenHalfWidth, hexToRgba(TIER_COLOR.green, 0.55));
+    drawPitchBand(redHalfWidth, TIER_COLOR.red, 0.35);
+    drawPitchBand(yellowHalfWidth, TIER_COLOR.yellow, 0.45);
+    drawPitchBand(greenHalfWidth, TIER_COLOR.green, 0.55);
 
     // "now" line — drawn after the (semi-transparent) band so it stays
     // fully bright where it crosses it, not dulled by the fill underneath.

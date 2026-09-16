@@ -2,7 +2,8 @@
 // a window across it, calling the same detectPitchYIN used for real-time
 // mic tracking (see pitch.js's header comment for why that sharing matters).
 
-import { detectPitchYIN } from './pitch.js';
+import { detectPitchYIN, OFFLINE_SECONDARY_YIN_THRESHOLD } from './pitch.js';
+import { MAX_INTERPOLATION_GAP_SEC } from './note-utils.js';
 import { store } from './db.js';
 
 const WINDOW_SIZE = 2048;
@@ -32,15 +33,47 @@ async function decodeToMono(blob) {
 export function analyzeSamples(samples, sampleRate) {
   const hopSec = HOP_SIZE / sampleRate;
   const points = [];
+  // The vocals stem is whatever LALAL.AI separated from the mix — lead and
+  // any backing/harmony vocals together, not just the melody — so a given
+  // ~10ms window can contain two simultaneous, individually clean pitches.
+  // detectPitchYIN can't tell from one window alone which is "the" line, so
+  // it's told here: the last voiced frequency is passed back in as
+  // preferFreqHz, which breaks that ambiguity in favor of staying on
+  // whichever voice was already being tracked, rather than hopping to
+  // whichever note's dip happens to be marginally cleaner in this window.
+  // Only the offline analyzer can do this (it can afford the sequential
+  // dependency); the real-time mic path never passes preferFreqHz, so live
+  // tracking is unaffected.
+  let lastVoicedFreqHz = null;
+  let lastVoicedTimeSec = null;
   for (let start = 0; start + WINDOW_SIZE <= samples.length; start += HOP_SIZE) {
+    const timeSec = start / sampleRate;
+    // A gap this wide is a real silence/instrumental break (see
+    // note-utils.js's MAX_INTERPOLATION_GAP_SEC) — the next phrase can
+    // start on any pitch, lead or harmony, so there's nothing to stay
+    // continuous with. A shorter gap (an unvoiced consonant, a quick
+    // breath mid-phrase) keeps the hint, so tracking doesn't reset every
+    // time voicing briefly drops out within the same held line.
+    const gapTooLong = lastVoicedTimeSec !== null && (timeSec - lastVoicedTimeSec) > MAX_INTERPOLATION_GAP_SEC;
+    const preferFreqHz = gapTooLong ? null : lastVoicedFreqHz;
     const window = samples.subarray(start, start + WINDOW_SIZE);
-    const { freqHz, confidence } = detectPitchYIN(window, sampleRate);
+    // secondaryThreshold: see pitch.js's OFFLINE_SECONDARY_YIN_THRESHOLD —
+    // rescues frames a harmony/backing vocal would otherwise drop entirely
+    // (a gap in the band) into a low-confidence point (a dimmed one)
+    // instead.
+    const { freqHz, confidence } = detectPitchYIN(window, sampleRate, {
+      preferFreqHz, secondaryThreshold: OFFLINE_SECONDARY_YIN_THRESHOLD,
+    });
     points.push({
-      timeSec: start / sampleRate,
+      timeSec,
       freqHz,
       midi: freqHz ? 69 + 12 * Math.log2(freqHz / 440) : null,
       confidence,
     });
+    if (freqHz !== null) {
+      lastVoicedFreqHz = freqHz;
+      lastVoicedTimeSec = timeSec;
+    }
   }
   return { hopSec, points };
 }
