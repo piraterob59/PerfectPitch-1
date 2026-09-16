@@ -2,6 +2,7 @@
 // Fleshed out incrementally as pitch.js/player.js/etc. land.
 
 import { store, uuid } from './db.js';
+import { downloadBackup, readBackupFile, importBackup } from './backup.js';
 import { separateVocals } from './lalalai.js';
 import { analyzeSongVocals } from './analyze.js';
 import { createPlayer } from './player.js';
@@ -82,6 +83,100 @@ function wireSettings() {
   });
   returnToSongBtn.addEventListener('click', () => {
     if (practiceSession) switchView('practice');
+  });
+}
+
+// --- Backup ---
+// See js/backup.js's header comment for why this exists: everything here
+// lives only in this browser's IndexedDB, with no server or sync.
+
+const exportBackupBtn = document.getElementById('export-backup-btn');
+const importBackupBtn = document.getElementById('import-backup-btn');
+const importBackupInput = document.getElementById('import-backup-input');
+const backupStatusEl = document.getElementById('backup-status');
+const backupConfirmEl = document.getElementById('backup-confirm');
+const backupConfirmTextEl = document.getElementById('backup-confirm-text');
+const backupConfirmCancelBtn = document.getElementById('backup-confirm-cancel');
+const backupConfirmRestoreBtn = document.getElementById('backup-confirm-restore');
+
+// The parsed (but not-yet-applied) file chosen via the file input, staged
+// here while the confirm step below is showing — restoring can overwrite
+// existing songs/attempts that share an id, so it isn't applied on choice.
+let pendingBackup = null;
+
+function showBackupStatus(text) {
+  backupStatusEl.textContent = text;
+  backupStatusEl.hidden = !text;
+}
+
+function wireBackup() {
+  exportBackupBtn.addEventListener('click', async () => {
+    exportBackupBtn.disabled = true;
+    showBackupStatus('Preparing backup…');
+    try {
+      const backup = await downloadBackup({
+        onProgress: (pct) => showBackupStatus(`Preparing backup… ${Math.round(pct)}%`),
+      });
+      showBackupStatus(`Backup downloaded (${backup.stores.songs.length} song(s)).`);
+    } catch (err) {
+      showBackupStatus(`Export failed: ${err.message || err}`);
+    } finally {
+      exportBackupBtn.disabled = false;
+    }
+  });
+
+  importBackupBtn.addEventListener('click', () => importBackupInput.click());
+
+  importBackupInput.addEventListener('change', async () => {
+    const file = importBackupInput.files[0];
+    importBackupInput.value = ''; // so choosing the same file again still fires 'change'
+    if (!file) return;
+    try {
+      const backup = await readBackupFile(file);
+      pendingBackup = backup;
+      const songCount = backup.stores.songs?.length ?? 0;
+      const attemptCount = backup.stores.attempts?.length ?? 0;
+      backupConfirmTextEl.textContent =
+        `Restore ${songCount} song(s) and ${attemptCount} attempt(s) from this backup ` +
+        `(exported ${new Date(backup.exportedAt).toLocaleString()})? Anything already on this ` +
+        `device that shares an id with the backup will be overwritten by it; everything else stays.`;
+      backupConfirmEl.hidden = false;
+      showBackupStatus('');
+    } catch (err) {
+      showBackupStatus(`Couldn't read that file: ${err.message || err}`);
+    }
+  });
+
+  backupConfirmCancelBtn.addEventListener('click', () => {
+    pendingBackup = null;
+    backupConfirmEl.hidden = true;
+  });
+
+  backupConfirmRestoreBtn.addEventListener('click', async () => {
+    if (!pendingBackup) return;
+    backupConfirmRestoreBtn.disabled = true;
+    showBackupStatus('Restoring…');
+    try {
+      await importBackup(pendingBackup, {
+        onProgress: (pct) => showBackupStatus(`Restoring… ${Math.round(pct)}%`),
+      });
+      backupConfirmEl.hidden = true;
+      pendingBackup = null;
+      // The restored library can differ arbitrarily from whatever was on
+      // screen (new songs, a session's song deleted/changed underneath
+      // it) — simplest correct thing is to drop any in-progress session
+      // and land back on a freshly rendered Library, same as the tabbar's
+      // own library click already does.
+      stopPracticeSession();
+      await loadSettings();
+      await renderLibrary();
+      switchView('library');
+      showBackupStatus('Backup restored.');
+    } catch (err) {
+      showBackupStatus(`Restore failed: ${err.message || err}`);
+    } finally {
+      backupConfirmRestoreBtn.disabled = false;
+    }
   });
 }
 
@@ -1402,6 +1497,7 @@ window.addEventListener('resize', () => {
 async function init() {
   wireTabbar();
   wireSettings();
+  wireBackup();
   registerServiceWorker();
   await loadSettings();
   await renderLibrary();

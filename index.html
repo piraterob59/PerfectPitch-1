@@ -108,6 +108,27 @@
           miss. Lower is stricter.
         </p>
 
+        <h2>Backup</h2>
+        <p class="settings-note">
+          Your song library, stems, pitch data, and recorded attempts live only in
+          this browser, on this device — there's no cloud copy. Export a backup
+          before clearing site data or switching devices, or just every so often,
+          so you're never one "clear storage" away from starting over.
+        </p>
+        <div class="backup-controls">
+          <button id="export-backup-btn" class="btn btn-secondary" type="button">Export Backup</button>
+          <button id="import-backup-btn" class="btn btn-secondary" type="button">Restore from Backup</button>
+          <input id="import-backup-input" type="file" accept="application/json" hidden />
+        </div>
+        <p id="backup-status" class="settings-note" hidden></p>
+        <div id="backup-confirm" class="backup-confirm" hidden>
+          <p id="backup-confirm-text" class="backup-confirm-text"></p>
+          <div class="backup-confirm-actions">
+            <button id="backup-confirm-cancel" class="btn btn-secondary" type="button">Cancel</button>
+            <button id="backup-confirm-restore" class="btn btn-primary" type="button">Restore</button>
+          </div>
+        </div>
+
         <h2>About</h2>
         <p class="settings-note">
           PerfectPitch separates vocals from instrumentals using LALAL.AI. Since LALAL.AI's API

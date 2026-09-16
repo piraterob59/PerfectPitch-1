@@ -498,6 +498,17 @@ body {
 .settings-note { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-top: 10px; }
 .settings-note code { color: var(--text); }
 
+.backup-controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.backup-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.backup-confirm-text { font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+.backup-confirm-actions { display: flex; gap: 10px; }
+
 .tabbar {
   display: flex;
   border-top: 1px solid var(--border);

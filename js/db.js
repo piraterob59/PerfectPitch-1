@@ -343,6 +343,38 @@ class Store {
     t.objectStore('sections').delete(id);
     return txDone(t);
   }
+
+  // Whole-database dump/restore for js/backup.js — every store, every row,
+  // as-is (Blobs included; base64-encoding those for the JSON backup file
+  // is backup.js's concern, not this layer's). Used because everything
+  // here lives only in this browser's IndexedDB, with no server/sync, so
+  // clearing site data or switching devices otherwise means losing the
+  // whole library with no way back.
+  async exportRaw() {
+    const db = await this.db();
+    const storeNames = ['songs', 'stems', 'pitchTimelines', 'meta', 'lyricCues', 'attempts', 'sections'];
+    const t = tx(db, storeNames, 'readonly');
+    const data = {};
+    for (const name of storeNames) {
+      data[name] = await reqToPromise(t.objectStore(name).getAll());
+    }
+    return data;
+  }
+
+  // Upserts every row back in by its own keyPath (put, not add) — a row
+  // whose id/songId/key already exists on this device is overwritten by
+  // the backup's version; anything else already here that the backup
+  // doesn't mention is left alone, so restoring is a merge, not a wipe.
+  async importRaw(data) {
+    const db = await this.db();
+    const storeNames = Object.keys(data).filter((name) => db.objectStoreNames.contains(name));
+    const t = tx(db, storeNames, 'readwrite');
+    for (const name of storeNames) {
+      const objectStore = t.objectStore(name);
+      for (const row of data[name]) objectStore.put(row);
+    }
+    return txDone(t);
+  }
 }
 
 export const store = new Store();
