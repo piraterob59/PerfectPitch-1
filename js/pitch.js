@@ -50,6 +50,17 @@ function finalizePitch(tauEstimate, cmnd, halfN, sampleRate, rms) {
     const s2 = cmnd[x2];
     const denom = 2 * s1 - s2 - s0;
     betterTau = denom === 0 ? tauEstimate : tauEstimate + (s2 - s0) / (2 * denom);
+    // A parabola fit through three equally-spaced points always has its
+    // vertex within [x0, x2] when it's a genuine local minimum — a result
+    // outside that range means denom was only near zero (a numerically
+    // near-flat fit), not real curvature, most often when the tau being
+    // refined sits at the edge of a narrow search window (see
+    // preferFreqHz's neighborhood search above) rather than a true dip.
+    // Confirmed live: an unclamped overshoot here produced a negative
+    // betterTau, and thus a negative freqHz, from an otherwise ordinary
+    // frame. Clamping is the correct fix, not just a defensive one — it's
+    // exactly the range a real vertex can fall in.
+    betterTau = Math.min(x2, Math.max(x0, betterTau));
   }
   return {
     freqHz: sampleRate / betterTau,

@@ -89,7 +89,13 @@ function fitSectionText(ctx, text, maxWidthPx) {
 
 export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
-  const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
+  // Number.isFinite(p.midi) matters, not just freqHz !== null: minMidi/
+  // maxMidi below take Math.min/max across every point's midi in one pass,
+  // and a single NaN (or Infinity) poisons that whole computation to NaN —
+  // which then makes midiToY() return NaN for literally every point, so
+  // the entire band vanishes for the whole song, not just near the bad
+  // sample. Confirmed live from one corrupted frame reaching this far.
+  const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null && Number.isFinite(p.midi));
   // { id, startSec, endSec, text } — user-marked (see db.js's sections
   // store), sorted so render() can scan them in order alongside the pitch
   // points. Each section's best-fit text layout is cached in

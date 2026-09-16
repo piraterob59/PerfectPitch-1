@@ -64,14 +64,21 @@ export function analyzeSamples(samples, sampleRate) {
     const { freqHz, confidence } = detectPitchYIN(window, sampleRate, {
       preferFreqHz, secondaryThreshold: OFFLINE_SECONDARY_YIN_THRESHOLD,
     });
+    // freqHz > 0 (not just !== null): a non-finite or non-positive value
+    // here would turn into a NaN midi, which is enough on its own to break
+    // the visualizer's rendering for the *entire* song, not just this one
+    // frame (see visualizer.js's point filter). pitch.js's own
+    // interpolation is guarded against producing one, but this is the
+    // last line of defense before a bad frame gets persisted.
+    const validFreqHz = Number.isFinite(freqHz) && freqHz > 0 ? freqHz : null;
     points.push({
       timeSec,
-      freqHz,
-      midi: freqHz ? 69 + 12 * Math.log2(freqHz / 440) : null,
+      freqHz: validFreqHz,
+      midi: validFreqHz ? 69 + 12 * Math.log2(validFreqHz / 440) : null,
       confidence,
     });
-    if (freqHz !== null) {
-      lastVoicedFreqHz = freqHz;
+    if (validFreqHz !== null) {
+      lastVoicedFreqHz = validFreqHz;
       lastVoicedTimeSec = timeSec;
     }
   }
