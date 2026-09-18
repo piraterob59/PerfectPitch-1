@@ -42,8 +42,14 @@ class PitchProcessor extends AudioWorkletProcessor {
     if (this.samplesSinceAnalysis >= this.hopSize) {
       this.samplesSinceAnalysis = 0;
       const ordered = this._linearize();
-      const { freqHz, confidence } = detectPitchYIN(ordered, sampleRate);
-      this.port.postMessage({ type: 'pitch', freqHz, confidence });
+      const { freqHz, confidence, rmsLevel } = detectPitchYIN(ordered, sampleRate);
+      // rmsLevel is forwarded even though detectPitchYIN already used it
+      // internally (the silence gate) — the main thread has no other way
+      // to know the mic is actually delivering signal at all, as opposed
+      // to no periodicity being found in real signal. That distinction is
+      // exactly what a stuck-at-zero mic level meter vs. a moving-but-
+      // pitchless one tells apart.
+      this.port.postMessage({ type: 'pitch', freqHz, confidence, rmsLevel });
     }
 
     return true;

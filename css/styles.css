@@ -235,6 +235,26 @@ body {
 
 .mic-status { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
 
+.mic-level-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mic-level-label { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+.mic-level-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.mic-level-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  background: var(--good);
+  /* Width changes almost every worklet message (~43/sec) -- no transition,
+     so the meter reads as instantaneous level, not a lagging animation. */
+}
+.mic-level-fill.mic-level-silent { background: var(--text-dim); }
+
 .accuracy-display { color: var(--good); font-size: 15px; font-weight: 600; margin-top: 8px; }
 .accuracy-display.accuracy-low { color: var(--bad); }
 .accuracy-display.accuracy-mid { color: var(--warn); }

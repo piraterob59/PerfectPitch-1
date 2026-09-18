@@ -380,6 +380,8 @@ const redoLastAttemptBtn = document.getElementById('redo-last-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
 const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
+const micLevelRowEl = document.getElementById('mic-level-row');
+const micLevelFillEl = document.getElementById('mic-level-fill');
 const accuracyDisplayEl = document.getElementById('accuracy-display');
 const sectionPanelEl = document.getElementById('section-panel');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
@@ -441,6 +443,21 @@ function formatDayLabel(ms) {
 function formatAccuracyDisplay(cumulativePct, rollingPct) {
   const fmt = (pct) => (pct === null ? '--' : pct + '%');
   return `Accuracy: ${fmt(cumulativePct)} · Last 5s: ${fmt(rollingPct)}`;
+}
+
+// Full-bar reference level for the mic meter — comfortably above normal
+// singing volume, so the bar has headroom rather than pinning at max.
+// SILENCE_RMS matches pitch.js's own default silence gate, so "gray" on
+// this meter means the same thing as "below the threshold that gates
+// pitch detection at all" — a mic reading that never clears gray, even
+// while actively singing, points at a hardware/OS routing problem rather
+// than a pitch-detection one.
+const MIC_LEVEL_METER_MAX_RMS = 0.3;
+const MIC_LEVEL_SILENCE_RMS = 0.02;
+function updateMicLevelMeter(rmsLevel) {
+  const pct = Math.max(0, Math.min(100, (rmsLevel / MIC_LEVEL_METER_MAX_RMS) * 100));
+  micLevelFillEl.style.width = `${pct}%`;
+  micLevelFillEl.classList.toggle('mic-level-silent', rmsLevel < MIC_LEVEL_SILENCE_RMS);
 }
 
 // Accepts "M:SS" (matching formatTime's own output, so round-tripping
@@ -1174,6 +1191,7 @@ async function openPractice(songId) {
   seekCurrentTimeEl.textContent = '0:00';
   seekDurationEl.textContent = '0:00';
   accuracyDisplayEl.hidden = true;
+  micLevelRowEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
   accuracyDisplayEl.className = 'accuracy-display';
   // Hidden here synchronously (the real answer — does this song have any
@@ -1487,8 +1505,9 @@ startSingingBtn.addEventListener('click', async () => {
     // on to.
     const micLatencySec = getAnalysisLatencySec(audioContext.sampleRate);
     const micSession = await startMicPitchTracking(audioContext, {
-      onPitch: ({ freqHz, confidence }) => {
+      onPitch: ({ freqHz, confidence, rmsLevel }) => {
         if (practiceSession !== session) return; // session torn down mid-flight
+        updateMicLevelMeter(rmsLevel);
         const t = Math.max(0, session.player.currentTime - micLatencySec);
         session.visualizer.pushLiveSample(t, freqHz, confidence);
         session.accuracyTracker.addSample(t, freqHz);
@@ -1502,6 +1521,8 @@ startSingingBtn.addEventListener('click', async () => {
     // access, since the catch below never had reason to undo it.
     practiceSession.accuracyTracker.reset();
     accuracyDisplayEl.hidden = false;
+    micLevelRowEl.hidden = false;
+    updateMicLevelMeter(0);
     accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
     accuracyDisplayEl.className = 'accuracy-display';
 
@@ -1573,6 +1594,7 @@ function abandonCurrentTakeAndSeek(session, seekSec) {
   setStartSingingButtonState(false);
   micStatusEl.textContent = '';
   accuracyDisplayEl.hidden = true;
+  micLevelRowEl.hidden = true;
   accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
   accuracyDisplayEl.className = 'accuracy-display';
 
