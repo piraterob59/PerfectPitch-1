@@ -86,10 +86,14 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
     if (freqHz === null) { voicedStreak = 0; return; }
     const targetMidi = interpolateTargetMidi(points, timeSec);
     if (targetMidi === null) { voicedStreak = 0; return; }
+    // Octave-invariant (see centsOffPitch) — singing the right note in a
+    // different register from the reference recording scores the same as
+    // singing it in the recording's own octave.
     const cents = centsOffPitch(freqHz, targetMidi);
     // Wildly off (see MAX_SCOREABLE_CENTS_OFF) is excluded entirely, not
-    // scored as a "red" miss — likely noise/an octave error, not a
-    // genuine attempt, so it shouldn't count against the score either way.
+    // scored as a "red" miss — likely mic noise or a genuine wrong note,
+    // not a real attempt at this target, so it shouldn't count against the
+    // score either way.
     if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) { voicedStreak = 0; return; }
     voicedStreak++;
     if (voicedStreak < REQUIRED_VOICED_STREAK) return;

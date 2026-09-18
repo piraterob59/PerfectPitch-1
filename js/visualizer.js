@@ -346,17 +346,28 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
       if (s.freqHz === null || s.timeSec < rangeStart) continue;
       const targetMidi = interpolateTargetMidi(s.timeSec);
       let color = '#9aa1ab';
+      // Defaults to the singer's own true pitch (used as-is when there's no
+      // target here at all); overridden below to the octave-aligned pitch
+      // whenever a target exists, so the dot visually sits inside the
+      // colored band it matches rather than at the singer's actual octave,
+      // which the graph's own vertical range (sized to the target melody's
+      // register) may not even show.
+      let displayMidi = 69 + 12 * Math.log2(s.freqHz / 440);
       if (targetMidi !== null) {
+        // Octave-invariant (see centsOffPitch) — matches scoring.js's own
+        // comparison, so a note drawn/colored as "on pitch" here is exactly
+        // one scoring.js would count as a hit.
         const cents = centsOffPitch(s.freqHz, targetMidi);
         // Matches scoring.js's own cutoff (see MAX_SCOREABLE_CENTS_OFF) —
         // a sample this far off isn't scored, so it isn't drawn either,
-        // rather than cluttering the graph with likely noise/octave-error
-        // dots that don't correspond to anything the score reflects.
+        // rather than cluttering the graph with mic noise or genuinely
+        // wrong notes that don't correspond to anything the score reflects.
         if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) continue;
         color = liveColorForCents(cents);
+        displayMidi = targetMidi + cents / 100;
       }
       const x = timeToX(s.timeSec, nowSec, w);
-      const y = midiToY(69 + 12 * Math.log2(s.freqHz / 440), h);
+      const y = midiToY(displayMidi, h);
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, y, 3.5, 0, Math.PI * 2);

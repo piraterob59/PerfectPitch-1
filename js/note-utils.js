@@ -20,10 +20,19 @@ export function freqToNoteName(freqHz) {
 }
 
 // How far `freqHz` is from `targetMidiOrFreq` (either a MIDI number or a
-// frequency in Hz — pass isFreq: true for the latter), in cents (1/100 semitone).
+// frequency in Hz — pass isFreq: true for the latter), in cents (1/100
+// semitone) — octave-invariant, so the result is always in (-600, 600].
+// Confirmed live: a user singing a song in their own natural register,
+// consistently over an octave below the reference recording's, had every
+// sample silently discarded as "too far off" before this — not a mic or
+// detection bug, just a wrong-octave note being treated as unrelated
+// noise. Almost nobody sings in the exact octave of the original
+// recording, so "off pitch" should mean the wrong note, not the right
+// note in a different register.
 export function centsOffPitch(freqHz, targetMidiOrFreq, { isFreq = false } = {}) {
   const targetMidi = isFreq ? freqToMidi(targetMidiOrFreq) : targetMidiOrFreq;
-  return (freqToMidi(freqHz) - targetMidi) * 100;
+  const rawCents = (freqToMidi(freqHz) - targetMidi) * 100;
+  return rawCents - Math.round(rawCents / 1200) * 1200;
 }
 
 // Classifies how far off pitch a sample is into the same green/yellow/red
