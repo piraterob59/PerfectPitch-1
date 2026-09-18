@@ -10,6 +10,7 @@ import { createVisualizer } from './visualizer.js';
 import { startMicPitchTracking, getAnalysisLatencySec } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
+import { suggestSectionBreaks } from './note-utils.js';
 
 const TOLERANCE_META_KEY = 'pitchToleranceCents';
 const DEFAULT_TOLERANCE_CENTS = 5;
@@ -381,6 +382,7 @@ const accuracyDisplayEl = document.getElementById('accuracy-display');
 const sectionPanelEl = document.getElementById('section-panel');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
 const markSectionEndBtn = document.getElementById('mark-section-end-btn');
+const suggestSectionsBtn = document.getElementById('suggest-sections-btn');
 const sectionPendingLabelEl = document.getElementById('section-pending-label');
 const sectionListEl = document.getElementById('section-list');
 const viewAttemptsBtn = document.getElementById('view-attempts-btn');
@@ -701,8 +703,37 @@ markSectionEndBtn.addEventListener('click', async () => {
   if (practiceSession === session) {
     practiceSession.visualizer.addSection(entry);
     practiceSession.accuracyTracker.addSection(entry);
+    suggestSectionsBtn.hidden = true;
     await renderSectionList(session.songId);
   }
+});
+
+// One-time starting point, not a replacement for marking sections by hand —
+// see note-utils.js's suggestSectionBreaks for why (a fixed gap heuristic
+// won't match every song's real structure). Only offered when the song has
+// no sections yet (see openPractice/this handler's own hiding below), so
+// there's never a question of it clobbering sections already typed in.
+suggestSectionsBtn.addEventListener('click', async () => {
+  if (!practiceSession) return;
+  const session = practiceSession;
+  const pitchTimeline = await store.getPitchTimeline(session.songId);
+  const voiced = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
+  const runs = suggestSectionBreaks(voiced);
+  if (!runs.length) {
+    sectionPendingLabelEl.textContent = "Couldn't find clear section breaks in this song's pitch data — try marking sections by hand instead.";
+    return;
+  }
+  suggestSectionsBtn.disabled = true;
+  for (const run of runs) {
+    const entry = await store.addSection({ songId: session.songId, startSec: run.startSec, endSec: run.endSec });
+    if (practiceSession !== session) return; // song changed mid-loop
+    practiceSession.visualizer.addSection(entry);
+    practiceSession.accuracyTracker.addSection(entry);
+  }
+  suggestSectionsBtn.hidden = true;
+  suggestSectionsBtn.disabled = false;
+  sectionPendingLabelEl.textContent = `Added ${runs.length} suggested section(s) — adjust boundaries and add lyrics below.`;
+  await renderSectionList(session.songId);
 });
 
 // Tracks the attempt (if any) currently showing its inline "delete this?"
@@ -1138,6 +1169,10 @@ async function openPractice(songId) {
   // heuristic that proved unreliable in practice. Each section's own `text`
   // is what the visualizer renders during playback (see createVisualizer).
   const songSections = await store.getSectionsForSong(songId);
+  // Offered only until the first section exists — a one-time head start for
+  // a fresh song, never a standing "redo this automatically" option that
+  // could clobber sections/lyrics already typed in.
+  suggestSectionsBtn.hidden = songSections.length > 0;
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, sections: songSections, toleranceCents });
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
   practiceSession = {

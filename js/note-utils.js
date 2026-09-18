@@ -79,20 +79,50 @@ export const MAX_INTERPOLATION_GAP_SEC = 0.5;
 // or phrases separated by an instrumental break or a long pause. Used to
 // give per-attempt accuracy a meaningful breakdown instead of one
 // whole-song average.
-export function computeVocalSections(voicedPoints) {
-  const sections = [];
+function splitByGap(voicedPoints, gapSec) {
+  const runs = [];
   let startSec = null;
   let lastTimeSec = null;
   for (const p of voicedPoints) {
-    if (lastTimeSec !== null && p.timeSec - lastTimeSec > MAX_INTERPOLATION_GAP_SEC) {
-      sections.push({ startSec, endSec: lastTimeSec });
+    if (lastTimeSec !== null && p.timeSec - lastTimeSec > gapSec) {
+      runs.push({ startSec, endSec: lastTimeSec });
       startSec = null;
     }
     if (startSec === null) startSec = p.timeSec;
     lastTimeSec = p.timeSec;
   }
-  if (startSec !== null) sections.push({ startSec, endSec: lastTimeSec });
-  return sections;
+  if (startSec !== null) runs.push({ startSec, endSec: lastTimeSec });
+  return runs;
+}
+
+export function computeVocalSections(voicedPoints) {
+  return splitByGap(voicedPoints, MAX_INTERPOLATION_GAP_SEC);
+}
+
+// A gap this wide is meant to catch a real structural pause between verses/
+// choruses (an instrumental break, a held breath before a new part), not
+// the much shorter breath/consonant gaps MAX_INTERPOLATION_GAP_SEC (0.5s)
+// is tuned for — splitting on that shorter gap here would produce a
+// section per phrase, not per song part.
+const SUGGESTED_SECTION_GAP_SEC = 1.5;
+// Drops a run this short from the suggestions entirely (not merged into a
+// neighbor) — a stray voiced blip inside a long instrumental gap is far
+// more likely a mic/detection artifact than an actual song section, and a
+// section this brief wouldn't be useful to type a lyric line into anyway.
+const MIN_SUGGESTED_SECTION_SEC = 3;
+
+// One-time starting point for the Sections panel's "Suggest Sections"
+// button: splits the song's voiced pitch data into candidate verse/chorus-
+// sized sections by real silence gaps, for the user to review, adjust, and
+// type lyrics into — not something that drives scoring or playback on its
+// own. Deliberately reuses the exact same split-by-gap logic as
+// computeVocalSections (just a wider gap and a minimum-length filter suited
+// to structural sections instead of per-attempt score grouping), rather
+// than a separate heuristic, so there's one gap-detection implementation to
+// trust.
+export function suggestSectionBreaks(voicedPoints) {
+  return splitByGap(voicedPoints, SUGGESTED_SECTION_GAP_SEC)
+    .filter((run) => run.endSec - run.startSec >= MIN_SUGGESTED_SECTION_SEC);
 }
 
 export function interpolateTargetMidi(points, t) {
