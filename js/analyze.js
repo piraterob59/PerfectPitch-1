@@ -2,7 +2,7 @@
 // a window across it, calling the same detectPitchYIN used for real-time
 // mic tracking (see pitch.js's header comment for why that sharing matters).
 
-import { detectPitchYIN, OFFLINE_SECONDARY_YIN_THRESHOLD } from './pitch.js';
+import { detectPitchYIN, SECONDARY_YIN_THRESHOLD } from './pitch.js';
 import { MAX_INTERPOLATION_GAP_SEC } from './note-utils.js';
 import { store } from './db.js';
 
@@ -41,9 +41,10 @@ export function analyzeSamples(samples, sampleRate) {
   // preferFreqHz, which breaks that ambiguity in favor of staying on
   // whichever voice was already being tracked, rather than hopping to
   // whichever note's dip happens to be marginally cleaner in this window.
-  // Only the offline analyzer can do this (it can afford the sequential
-  // dependency); the real-time mic path never passes preferFreqHz, so live
-  // tracking is unaffected.
+  // audio-worklet-processor.js does the same thing for the real-time mic
+  // path, for the same reason: singing along without headphones means the
+  // instrumental itself bleeds into the mic, which is just as much a
+  // second simultaneous source as a backing vocal is here.
   let lastVoicedFreqHz = null;
   let lastVoicedTimeSec = null;
   for (let start = 0; start + WINDOW_SIZE <= samples.length; start += HOP_SIZE) {
@@ -57,12 +58,12 @@ export function analyzeSamples(samples, sampleRate) {
     const gapTooLong = lastVoicedTimeSec !== null && (timeSec - lastVoicedTimeSec) > MAX_INTERPOLATION_GAP_SEC;
     const preferFreqHz = gapTooLong ? null : lastVoicedFreqHz;
     const window = samples.subarray(start, start + WINDOW_SIZE);
-    // secondaryThreshold: see pitch.js's OFFLINE_SECONDARY_YIN_THRESHOLD —
+    // secondaryThreshold: see pitch.js's SECONDARY_YIN_THRESHOLD —
     // rescues frames a harmony/backing vocal would otherwise drop entirely
     // (a gap in the band) into a low-confidence point (a dimmed one)
     // instead.
     const { freqHz, confidence } = detectPitchYIN(window, sampleRate, {
-      preferFreqHz, secondaryThreshold: OFFLINE_SECONDARY_YIN_THRESHOLD,
+      preferFreqHz, secondaryThreshold: SECONDARY_YIN_THRESHOLD,
     });
     // freqHz > 0 (not just !== null): a non-finite or non-positive value
     // here would turn into a NaN midi, which is enough on its own to break

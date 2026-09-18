@@ -4,7 +4,7 @@
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
 import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
-import { OFFLINE_SECONDARY_YIN_THRESHOLD } from './pitch.js';
+import { SECONDARY_YIN_THRESHOLD } from './pitch.js';
 
 const WINDOW_SEC = 6;
 const NOW_FRAC = 0.3; // "now" line sits 30% in from the left
@@ -23,7 +23,7 @@ const RED_BAND_EXTRA_CENTS = 50;
 // actual font size is chosen within that budget.
 const LYRIC_BAND_HEIGHT = 92;
 // The offline analyzer's YIN detector accepts a point down to
-// OFFLINE_SECONDARY_YIN_THRESHOLD (see pitch.js) when nothing clears its
+// SECONDARY_YIN_THRESHOLD (see pitch.js) when nothing clears its
 // stricter primary threshold — a harmony/backing vocal sharing the frame
 // with the lead is exactly when that fallback kicks in — so no accepted
 // point's confidence (1 - dip) ever falls below this floor. A genuinely
@@ -32,7 +32,7 @@ const LYRIC_BAND_HEIGHT = 92;
 // alpha below so the target band visibly dims exactly where the reference
 // pitch is least trustworthy, instead of either drawing every accepted
 // frame at equal, unearned confidence, or dropping it as a gap.
-const CONFIDENCE_FLOOR = 1 - OFFLINE_SECONDARY_YIN_THRESHOLD;
+const CONFIDENCE_FLOOR = 1 - SECONDARY_YIN_THRESHOLD;
 const CONFIDENCE_DIM_ALPHA_SCALE = 0.3; // fill alpha at the confidence floor, as a fraction of full
 // Quantizing into a handful of alpha steps groups nearby-confidence frames
 // into one fill() path instead of one per ~10ms point — real audio's

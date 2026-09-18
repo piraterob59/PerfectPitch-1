@@ -4,10 +4,17 @@
 // deprecated main-thread ScriptProcessorNode. Imports the same
 // detectPitchYIN used by analyze.js's offline pass, so there's one DSP
 // implementation, not two to keep in sync.
-import { detectPitchYIN } from './pitch.js';
+import { detectPitchYIN, SECONDARY_YIN_THRESHOLD } from './pitch.js';
 
 const WINDOW_SIZE = 2048;
 const HOP_SIZE = 1024; // ~23ms @44.1kHz -> ~43 pitch messages/sec
+// Same role as note-utils.js's MAX_INTERPOLATION_GAP_SEC (not imported
+// directly — this worklet's isolated module scope already pulls in only
+// pitch.js, and duplicating one small constant beats adding a second
+// cross-worklet import for it): a silence this long is a real pause, not
+// just a missed frame, so the continuity hint below resets instead of
+// anchoring the next frame to a stale pitch.
+const CONTINUITY_RESET_SEC = 0.5;
 
 class PitchProcessor extends AudioWorkletProcessor {
   constructor(options) {
@@ -17,6 +24,16 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.ringBuffer = new Float32Array(this.windowSize);
     this.writeIndex = 0;
     this.samplesSinceAnalysis = 0;
+    // Confirmed live: singing without headphones means the instrumental
+    // itself bleeds into the mic alongside the voice, at a level that can
+    // easily stop the strict-threshold search from ever finding the voice's
+    // own dip — the mic level meter shows real signal, but no pitch ever
+    // comes out. Same fix as analyze.js's backing-vocal case: track the
+    // last voiced pitch and feed it back in as a continuity hint, so the
+    // search stays anchored to the voice instead of needing an unaided
+    // strict-threshold dip every single ~23ms frame.
+    this.lastVoicedFreqHz = null;
+    this.lastVoicedTime = null;
   }
 
   // Rebuilds a time-ordered buffer starting at the oldest sample, since
@@ -42,7 +59,17 @@ class PitchProcessor extends AudioWorkletProcessor {
     if (this.samplesSinceAnalysis >= this.hopSize) {
       this.samplesSinceAnalysis = 0;
       const ordered = this._linearize();
-      const { freqHz, confidence, rmsLevel } = detectPitchYIN(ordered, sampleRate);
+      // `currentTime` is an AudioWorkletGlobalScope global, same as
+      // `sampleRate` below — both already used this way, no import needed.
+      const gapTooLong = this.lastVoicedTime !== null && (currentTime - this.lastVoicedTime) > CONTINUITY_RESET_SEC;
+      const preferFreqHz = gapTooLong ? null : this.lastVoicedFreqHz;
+      const { freqHz, confidence, rmsLevel } = detectPitchYIN(ordered, sampleRate, {
+        preferFreqHz, secondaryThreshold: SECONDARY_YIN_THRESHOLD,
+      });
+      if (freqHz !== null) {
+        this.lastVoicedFreqHz = freqHz;
+        this.lastVoicedTime = currentTime;
+      }
       // rmsLevel is forwarded even though detectPitchYIN already used it
       // internally (the silence gate) — the main thread has no other way
       // to know the mic is actually delivering signal at all, as opposed

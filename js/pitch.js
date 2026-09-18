@@ -11,19 +11,19 @@
 
 export const DEFAULT_YIN_THRESHOLD = 0.15;
 
-// A second, looser threshold used only by the offline analyzer (see
-// analyze.js), for frames where nothing clears DEFAULT_YIN_THRESHOLD at
-// all. Two simultaneous voices (lead + harmony) raise the difference
-// function's noise floor enough that neither one's dip reliably clears the
-// strict threshold, even though real periodicity is still present — that's
-// what was fragmenting the target band into disconnected dashes through
-// dense harmony passages, since a fully rejected frame becomes a gap, not
-// just a dim point. Real-time mic tracking never uses this (see
-// audio-worklet-processor.js) — a live take is one voice, so a frame that
-// fails the strict threshold really is noise/silence, and a wrong guess
-// there costs a scored miss immediately rather than just a dimmer target
-// band.
-export const OFFLINE_SECONDARY_YIN_THRESHOLD = 0.3;
+// A second, looser threshold for frames where nothing clears
+// DEFAULT_YIN_THRESHOLD at all. A second simultaneous sound source —
+// backing vocals bleeding into the offline vocals stem (see analyze.js),
+// or the instrumental itself bleeding into the mic when singing without
+// headphones (see audio-worklet-processor.js) — raises the difference
+// function's noise floor enough that the real voice's own dip doesn't
+// reliably clear the strict threshold, even though real periodicity is
+// still present. Safest paired with a preferFreqHz continuity hint (see
+// detectPitchYIN below), which anchors the search to where the tracked
+// voice should be rather than wherever the single strongest periodicity in
+// the frame happens to sit — a loose bar with no hint at all is more prone
+// to picking up the OTHER source's periodicity instead.
+export const SECONDARY_YIN_THRESHOLD = 0.3;
 
 // How far (in cents) a frame's pitch may drift from the previous frame's
 // and still count as the same voice continuing, when searching near a
