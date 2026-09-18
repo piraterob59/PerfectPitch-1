@@ -373,6 +373,8 @@ const seekCurrentTimeEl = document.getElementById('seek-current-time');
 const seekDurationEl = document.getElementById('seek-duration');
 const seekNudgeBackBtn = document.getElementById('seek-nudge-back-btn');
 const seekNudgeFwdBtn = document.getElementById('seek-nudge-fwd-btn');
+const attemptSeekNudgeBackBtn = document.getElementById('attempt-seek-nudge-back-btn');
+const attemptSeekNudgeFwdBtn = document.getElementById('attempt-seek-nudge-fwd-btn');
 const resetAttemptBtn = document.getElementById('reset-attempt-btn');
 const redoLastAttemptBtn = document.getElementById('redo-last-attempt-btn');
 const playPauseBtn = document.getElementById('play-pause-btn');
@@ -1240,6 +1242,41 @@ seekBarEl.addEventListener('input', () => {
 // the slider's own step size. 0.1s is fine enough to land exactly on a
 // syllable after a rough drag gets you close.
 const SEEK_NUDGE_SEC = 0.1;
+// Holding a nudge button down repeats the step continuously instead of
+// requiring a separate click per 0.1s — a single tap still does one step
+// (the delay below), but holding scrolls smoothly the way the slider drag
+// does, which matters most when covering more than a second or two.
+const NUDGE_REPEAT_DELAY_MS = 350;
+const NUDGE_REPEAT_INTERVAL_MS = 80;
+function wireHoldToRepeat(button, fn) {
+  let delayTimer = null;
+  let repeatTimer = null;
+  // Set on pointerdown so the click event that naturally follows a mouse/
+  // touch press isn't treated as a second, separate step — pointerdown
+  // already fired one. A keyboard activation (Enter/Space) never fires
+  // pointerdown at all, so it still reaches the click handler below and
+  // triggers exactly one step, same as before this change.
+  let viaPointer = false;
+  function stop() {
+    clearTimeout(delayTimer);
+    clearInterval(repeatTimer);
+    delayTimer = null;
+    repeatTimer = null;
+  }
+  button.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return; // primary mouse button / touch only
+    viaPointer = true;
+    fn();
+    delayTimer = setTimeout(() => {
+      repeatTimer = setInterval(fn, NUDGE_REPEAT_INTERVAL_MS);
+    }, NUDGE_REPEAT_DELAY_MS);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((evt) => button.addEventListener(evt, stop));
+  button.addEventListener('click', () => {
+    if (viaPointer) { viaPointer = false; return; }
+    fn();
+  });
+}
 function stepSeek(deltaSec) {
   if (!practiceSession) return;
   const { player } = practiceSession;
@@ -1250,8 +1287,22 @@ function stepSeek(deltaSec) {
   seekBarEl.value = target;
   seekCurrentTimeEl.textContent = formatTime(target);
 }
-seekNudgeBackBtn.addEventListener('click', () => stepSeek(-SEEK_NUDGE_SEC));
-seekNudgeFwdBtn.addEventListener('click', () => stepSeek(SEEK_NUDGE_SEC));
+wireHoldToRepeat(seekNudgeBackBtn, () => stepSeek(-SEEK_NUDGE_SEC));
+wireHoldToRepeat(seekNudgeFwdBtn, () => stepSeek(SEEK_NUDGE_SEC));
+
+// Same hold-to-repeat nudge, for the Attempts screen's own player — a
+// no-op while nothing is loaded there (attemptPlayerEl.hidden), same guard
+// every other attempt-player control implicitly relies on.
+function stepAttemptSeek(deltaSec) {
+  if (attemptPlayerEl.hidden) return;
+  const duration = attemptVideoEl.duration || parseFloat(attemptSeekBarEl.max) || 0;
+  const target = Math.max(0, Math.min(duration, attemptVideoEl.currentTime + deltaSec));
+  attemptVideoEl.currentTime = target;
+  attemptSeekBarEl.value = target;
+  attemptCurrentTimeEl.textContent = formatTime(target);
+}
+wireHoldToRepeat(attemptSeekNudgeBackBtn, () => stepAttemptSeek(-SEEK_NUDGE_SEC));
+wireHoldToRepeat(attemptSeekNudgeFwdBtn, () => stepAttemptSeek(SEEK_NUDGE_SEC));
 
 // Hides the Sections panel while actively singing and grows the pitch graph
 // into the space it frees up (see #pitch-canvas.singing), since the graph
