@@ -10,7 +10,7 @@ import { createVisualizer } from './visualizer.js';
 import { startMicPitchTracking, getAnalysisLatencySec } from './mic.js';
 import { createAccuracyTracker } from './scoring.js';
 import { createAttemptRecorder, isRecordingSupported } from './recorder.js';
-import { suggestSectionBreaks } from './note-utils.js';
+import { suggestSectionBreaks, findSkippableInstrumentalGaps, INSTRUMENTAL_SKIP_LEAD_IN_SEC } from './note-utils.js';
 
 const TOLERANCE_META_KEY = 'pitchToleranceCents';
 const DEFAULT_TOLERANCE_CENTS = 5;
@@ -385,6 +385,8 @@ const sectionPanelEl = document.getElementById('section-panel');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
 const markSectionEndBtn = document.getElementById('mark-section-end-btn');
 const suggestSectionsBtn = document.getElementById('suggest-sections-btn');
+const instrumentalPanelEl = document.getElementById('instrumental-panel');
+const instrumentalListEl = document.getElementById('instrumental-list');
 const sectionPendingLabelEl = document.getElementById('section-pending-label');
 const sectionListEl = document.getElementById('section-list');
 const viewAttemptsBtn = document.getElementById('view-attempts-btn');
@@ -674,6 +676,40 @@ async function renderSectionList(songId) {
     li.appendChild(lyricRow);
 
     sectionListEl.appendChild(li);
+  });
+}
+
+// The detected-gaps list on practiceSession never changes shape after
+// openPractice builds it (only each gap's own `.skip` flag toggles), so
+// this just re-renders from that in-memory array rather than re-running
+// detection — cheap either way, but keeps a single source of truth.
+function renderInstrumentalList(songId) {
+  const gaps = practiceSession?.songId === songId ? practiceSession.instrumentalGaps : [];
+  instrumentalPanelEl.hidden = gaps.length === 0;
+  instrumentalListEl.innerHTML = '';
+  gaps.forEach((gap, i) => {
+    const li = document.createElement('li');
+    li.className = 'instrumental-row';
+    const durationSec = Math.round(gap.endSec - gap.startSec);
+    li.innerHTML = `
+      <input type="checkbox" class="instrumental-row-checkbox" id="instrumental-skip-${i}" />
+      <label class="instrumental-row-label" for="instrumental-skip-${i}">${formatTime(gap.startSec)}–${formatTime(gap.endSec)}</label>
+      <span class="instrumental-row-duration">${durationSec}s</span>
+    `;
+    const checkbox = li.querySelector('.instrumental-row-checkbox');
+    checkbox.checked = gap.skip;
+    checkbox.addEventListener('change', async () => {
+      gap.skip = checkbox.checked;
+      if (checkbox.checked) {
+        await store.setInstrumentalSkip({ songId, startSec: gap.startSec, endSec: gap.endSec });
+      } else {
+        await store.deleteInstrumentalSkip(songId, gap.startSec);
+        // Un-skipping a gap the current pass already jumped past should let
+        // it fire again if playback ever re-enters it (e.g. after a Reset).
+        if (practiceSession) practiceSession.skippedGapKeys.delete(gap.startSec.toFixed(2));
+      }
+    });
+    instrumentalListEl.appendChild(li);
   });
 }
 
@@ -1177,11 +1213,26 @@ async function openPractice(songId) {
   suggestSectionsBtn.hidden = songSections.length > 0;
   const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, sections: songSections, toleranceCents });
   const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
+
+  const voicedForGaps = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
+  const skipRows = await store.getInstrumentalSkipsForSong(songId);
+  const skippedKeys = new Set(skipRows.map((r) => r.startSec.toFixed(2)));
+  const instrumentalGaps = findSkippableInstrumentalGaps(voicedForGaps)
+    .map((gap) => ({ ...gap, skip: skippedKeys.has(gap.startSec.toFixed(2)) }));
+
   practiceSession = {
-    songId, player, visualizer, accuracyTracker, toleranceCents,
+    songId, player, visualizer, accuracyTracker, toleranceCents, instrumentalGaps,
+    // Gaps already jumped past during the current playback pass, so the
+    // skip only fires once per approach — reset on Reset/Redo Attempt
+    // (see abandonCurrentTakeAndSeek) so seeking back to the start makes
+    // every gap eligible to skip again, but a deliberate manual scrub back
+    // INTO an already-skipped gap (to review it) doesn't get yanked
+    // forward again.
+    skippedGapKeys: new Set(),
     rafId: null, audioContext: null, playerSourceNode: null, micSession: null, recorder: null, attemptStartedAt: null,
     pendingSave: null,
   };
+  renderInstrumentalList(songId);
 
   // Duration isn't known until the browser has parsed enough of the audio;
   // readyState check covers blobs that load fast enough to already have it
@@ -1214,6 +1265,22 @@ async function openPractice(songId) {
   function loop() {
     if (practiceSession !== session) return;
     visualizer.render(player.currentTime);
+    // Only while actually playing forward — a manual seek-bar drag into a
+    // skip-marked gap should land exactly where dragged, not get yanked
+    // further forward. Reset (see abandonCurrentTakeAndSeek) clears
+    // skippedGapKeys, so a gap that's already been jumped past this pass
+    // won't re-trigger just from a rewind that lands back inside it.
+    if (!player.paused) {
+      for (const gap of session.instrumentalGaps) {
+        if (!gap.skip || session.skippedGapKeys.has(gap.startSec.toFixed(2))) continue;
+        const skipTargetSec = gap.endSec - INSTRUMENTAL_SKIP_LEAD_IN_SEC;
+        if (player.currentTime >= gap.startSec && player.currentTime < skipTargetSec) {
+          session.skippedGapKeys.add(gap.startSec.toFixed(2));
+          player.seek(skipTargetSec);
+          break; // one skip per frame is plenty; the rest catch up next frame if needed
+        }
+      }
+    }
     seekBarEl.value = player.currentTime;
     seekCurrentTimeEl.textContent = formatTime(player.currentTime);
     if (!accuracyDisplayEl.hidden) {
@@ -1511,6 +1578,7 @@ function abandonCurrentTakeAndSeek(session, seekSec) {
 
   session.player.pause();
   session.player.seek(seekSec);
+  session.skippedGapKeys.clear();
   playPauseBtn.textContent = 'Play';
   seekBarEl.value = seekSec;
   seekCurrentTimeEl.textContent = formatTime(seekSec);

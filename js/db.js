@@ -3,7 +3,7 @@
 // a lazily-opened single connection, and a shared Store singleton.
 
 const DB_NAME = 'perfectpitch';
-const DB_VERSION = 4; // bump this + add an onupgradeneeded branch if the schema ever changes
+const DB_VERSION = 5; // bump this + add an onupgradeneeded branch if the schema ever changes
 
 function openDB(onClose) {
   return new Promise((resolve, reject) => {
@@ -48,6 +48,16 @@ function openDB(onClose) {
         // proved unreliable. Feeds scoring.js's per-section accuracy
         // breakdown on the Attempts screen.
         const store = db.createObjectStore('sections', { keyPath: 'id' });
+        store.createIndex('songId', 'songId');
+      }
+      if (!db.objectStoreNames.contains('instrumentalSkips')) {
+        // Which detected long instrumental gaps (see note-utils.js's
+        // findSkippableInstrumentalGaps) the user has opted to skip during
+        // playback — a row's mere existence means "skip this one". Keyed by
+        // songId + the gap's own startSec (stable as long as the song isn't
+        // re-analyzed) rather than a uuid, so toggling is a plain
+        // put/delete instead of needing to look up an id first.
+        const store = db.createObjectStore('instrumentalSkips', { keyPath: 'id' });
         store.createIndex('songId', 'songId');
       }
     };
@@ -132,7 +142,7 @@ class Store {
   // + recorded attempts + sections.
   async deleteSong(id) {
     const db = await this.db();
-    const t = tx(db, ['songs', 'stems', 'pitchTimelines', 'lyricCues', 'attempts', 'sections'], 'readwrite');
+    const t = tx(db, ['songs', 'stems', 'pitchTimelines', 'lyricCues', 'attempts', 'sections', 'instrumentalSkips'], 'readwrite');
     t.objectStore('songs').delete(id);
     t.objectStore('pitchTimelines').delete(id);
     const range = IDBKeyRange.only(id);
@@ -150,6 +160,7 @@ class Store {
     cascadeBySongId('lyricCues');
     cascadeBySongId('attempts');
     cascadeBySongId('sections');
+    cascadeBySongId('instrumentalSkips');
     return txDone(t);
   }
 
@@ -344,6 +355,32 @@ class Store {
     return txDone(t);
   }
 
+  async getInstrumentalSkipsForSong(songId) {
+    const db = await this.db();
+    const t = tx(db, 'instrumentalSkips', 'readonly');
+    const idx = t.objectStore('instrumentalSkips').index('songId');
+    return reqToPromise(idx.getAll(IDBKeyRange.only(songId)));
+  }
+
+  // Marks a detected instrumental gap to be skipped during playback — a
+  // plain put keyed by songId+startSec, not an add-then-look-up-the-id
+  // dance, since the caller (app.js) already knows the gap's own bounds
+  // from note-utils.js's detection and never needs a separate generated id.
+  async setInstrumentalSkip({ songId, startSec, endSec }) {
+    const db = await this.db();
+    const t = tx(db, 'instrumentalSkips', 'readwrite');
+    const entry = { id: `${songId}:${startSec.toFixed(2)}`, songId, startSec, endSec, createdAt: Date.now() };
+    t.objectStore('instrumentalSkips').put(entry);
+    return txDone(t, entry);
+  }
+
+  async deleteInstrumentalSkip(songId, startSec) {
+    const db = await this.db();
+    const t = tx(db, 'instrumentalSkips', 'readwrite');
+    t.objectStore('instrumentalSkips').delete(`${songId}:${startSec.toFixed(2)}`);
+    return txDone(t);
+  }
+
   // Whole-database dump/restore for js/backup.js — every store, every row,
   // as-is (Blobs included; base64-encoding those for the JSON backup file
   // is backup.js's concern, not this layer's). Used because everything
@@ -352,7 +389,7 @@ class Store {
   // whole library with no way back.
   async exportRaw() {
     const db = await this.db();
-    const storeNames = ['songs', 'stems', 'pitchTimelines', 'meta', 'lyricCues', 'attempts', 'sections'];
+    const storeNames = ['songs', 'stems', 'pitchTimelines', 'meta', 'lyricCues', 'attempts', 'sections', 'instrumentalSkips'];
     const t = tx(db, storeNames, 'readonly');
     const data = {};
     for (const name of storeNames) {

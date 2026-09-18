@@ -132,6 +132,41 @@ export function suggestSectionBreaks(voicedPoints) {
     .filter((run) => run.endSec - run.startSec >= MIN_SUGGESTED_SECTION_SEC);
 }
 
+// A gap has to clear this to be worth offering as a skip — well past
+// INSTRUMENTAL_SKIP_LEAD_IN_SEC below, since a gap only a little longer
+// than the lead-in itself would barely save any time once that lead-in is
+// preserved, and past SUGGESTED_SECTION_GAP_SEC (0.8s) so ordinary section
+// breaks never show up here.
+const INSTRUMENTAL_SKIP_MIN_GAP_SEC = 15;
+// How much instrumental to leave playing right before the next vocal
+// entrance when a gap is skipped — enough to hear the beat/lead-in and
+// come back in on time, rather than being dropped in cold.
+export const INSTRUMENTAL_SKIP_LEAD_IN_SEC = 10;
+
+// Finds long instrumental stretches — real gaps in the vocal timeline
+// worth skipping past during playback, not the shorter breath/section gaps
+// splitByGap's other callers care about. Includes the intro (silence
+// before the first vocal entrance) as well as mid-song gaps, since both
+// "lead into" a next vocal section the same way; excludes any trailing
+// silence after the last vocal entrance, since there's no next section to
+// lead into there. Returns raw candidate gaps for the UI to list — whether
+// a given one is actually skipped during playback is a separate, persisted
+// per-song choice (see db.js's instrumentalSkips store).
+export function findSkippableInstrumentalGaps(voicedPoints) {
+  const gaps = [];
+  if (!voicedPoints.length) return gaps;
+  if (voicedPoints[0].timeSec > INSTRUMENTAL_SKIP_MIN_GAP_SEC) {
+    gaps.push({ startSec: 0, endSec: voicedPoints[0].timeSec });
+  }
+  for (let i = 1; i < voicedPoints.length; i++) {
+    const gapSec = voicedPoints[i].timeSec - voicedPoints[i - 1].timeSec;
+    if (gapSec > INSTRUMENTAL_SKIP_MIN_GAP_SEC) {
+      gaps.push({ startSec: voicedPoints[i - 1].timeSec, endSec: voicedPoints[i].timeSec });
+    }
+  }
+  return gaps;
+}
+
 export function interpolateTargetMidi(points, t) {
   if (!points.length) return null;
   let lo = 0;
