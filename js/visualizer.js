@@ -18,9 +18,9 @@ const RED_BAND_EXTRA_CENTS = 50;
 // Reserved vertical strip at the bottom of the canvas, for section lyric
 // text. The ribbon's pitch-to-y mapping is compressed to end above this
 // strip (see midiToY), so the ribbon can never physically enter it no
-// matter how the pitch curves. Sized for two lines at MAX_SECTION_FONT_PX
-// plus a little padding — see computeSectionLayout for how a section's
-// actual font size is chosen within that budget.
+// matter how the pitch curves. Also doubles as fitSectionText's vertical
+// cap on font size, since a section's lyric is always a single line now —
+// see computeSectionLayout for how a section's actual font size is chosen.
 const LYRIC_BAND_HEIGHT = 92;
 // The offline analyzer's YIN detector accepts a point down to
 // SECONDARY_YIN_THRESHOLD (see pitch.js) when nothing clears its
@@ -45,46 +45,41 @@ function confidenceAlphaScale(confidence) {
   const norm = Math.max(0, Math.min(1, ((confidence ?? 1) - CONFIDENCE_FLOOR) / (1 - CONFIDENCE_FLOOR)));
   return CONFIDENCE_DIM_ALPHA_SCALE + norm * (1 - CONFIDENCE_DIM_ALPHA_SCALE);
 }
-const MAX_SECTION_FONT_PX = 32;
 const MIN_SECTION_FONT_PX = 12;
+// Sanity ceiling only — LYRIC_BAND_HEIGHT (via fitSectionText's own
+// vertical cap below) is what actually binds in the normal case of a
+// short lyric in a long section; this just stops a one-character lyric in
+// a very long section from blowing up to something absurd.
+const MAX_SECTION_FONT_PX = 80;
 const SECTION_LINE_HEIGHT_RATIO = 1.2;
 const SECTION_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, sans-serif';
 
-// Greedy word-wrap: adds words to the current line until one would exceed
-// maxWidthPx, then starts a new line. A single word wider than maxWidthPx
-// still gets its own line (better to overflow slightly than drop text).
-function wrapTextToLines(ctx, text, maxWidthPx) {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines = [];
-  let current = '';
-  for (const word of words) {
-    const attempt = current ? `${current} ${word}` : word;
-    if (!current || ctx.measureText(attempt).width <= maxWidthPx) {
-      current = attempt;
-    } else {
-      lines.push(current);
-      current = word;
-    }
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
-// Picks the largest font size (within [MIN_SECTION_FONT_PX,
-// MAX_SECTION_FONT_PX]) that wraps `text` into at most 2 lines each fitting
-// maxWidthPx — "as big as possible to fit in no more than two rows", per
-// the actual request this implements. Falls back to the smallest size
-// (however many lines that takes) only in the rare case even that doesn't
-// fit in 2 — very long text in a very short section.
+// Picks the font size that makes `text`, rendered as a single line, span
+// exactly maxWidthPx — the section's own full on-screen width — end to
+// end, rather than the largest size that merely fits within a line-count
+// budget. Measuring once at a reference size and scaling proportionally
+// (not a per-pixel search loop) both finds the exact size directly and
+// guarantees a short lyric in a long section actually stretches to fill
+// it, instead of rendering small with empty space trailing after it —
+// which a fixed, capped font-size ladder could never reliably do.
 function fitSectionText(ctx, text, maxWidthPx) {
-  if (!text) return { fontPx: MAX_SECTION_FONT_PX, lines: [] };
-  for (let fontPx = MAX_SECTION_FONT_PX; fontPx >= MIN_SECTION_FONT_PX; fontPx -= 1) {
-    ctx.font = `bold ${fontPx}px ${SECTION_FONT_FAMILY}`;
-    const lines = wrapTextToLines(ctx, text, maxWidthPx);
-    if (lines.length <= 2) return { fontPx, lines };
-  }
-  ctx.font = `bold ${MIN_SECTION_FONT_PX}px ${SECTION_FONT_FAMILY}`;
-  return { fontPx: MIN_SECTION_FONT_PX, lines: wrapTextToLines(ctx, text, maxWidthPx) };
+  if (!text) return { fontPx: MIN_SECTION_FONT_PX, scaleX: 1, text: '' };
+  const REFERENCE_PX = 100;
+  ctx.font = `bold ${REFERENCE_PX}px ${SECTION_FONT_FAMILY}`;
+  const naturalWidthAtReference = ctx.measureText(text).width;
+  const verticalCapPx = LYRIC_BAND_HEIGHT / SECTION_LINE_HEIGHT_RATIO; // one line must fit the reserved band
+  const fittedPx = naturalWidthAtReference > 0 ? REFERENCE_PX * (maxWidthPx / naturalWidthAtReference) : MAX_SECTION_FONT_PX;
+  const fontPx = Math.max(MIN_SECTION_FONT_PX, Math.min(MAX_SECTION_FONT_PX, verticalCapPx, fittedPx));
+  // fontPx alone can't always reach maxWidthPx — a short lyric in a long
+  // section hits the vertical cap before the width-filling size, and a
+  // long lyric in a short section hits the minimum readable size before
+  // shrinking enough to fit. A horizontal-only stretch/squeeze applied at
+  // render time (not baked into fontPx, which would distort height too)
+  // closes that remaining gap either way, so the line always spans
+  // exactly start to end regardless of how short or long the text is.
+  const naturalWidthAtFontPx = naturalWidthAtReference * (fontPx / REFERENCE_PX);
+  const scaleX = naturalWidthAtFontPx > 0 ? maxWidthPx / naturalWidthAtFontPx : 1;
+  return { fontPx, scaleX, text };
 }
 
 export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toleranceCents = 5 }) {
@@ -103,7 +98,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
   // render() frame, since it only depends on the section's own duration and
   // text, not on playback position or scroll.
   let sectionList = [...sections].sort((a, b) => a.startSec - b.startSec);
-  const sectionLayouts = new Map(); // id -> { fontPx, lines }
+  const sectionLayouts = new Map(); // id -> { fontPx, scaleX, text }
   // The Settings tolerance slider's green-band threshold — same value
   // scoring.js uses, so a dot's color always matches whether it actually
   // counted as a hit. Mutable via setTolerance() for live Settings changes.
@@ -316,28 +311,36 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
 
     // Section lyric text: shown for a section's entire on-screen span, not
     // just an instant — unlike the old point-in-time cues this replaced —
-    // sized once per section (see computeSectionLayout) to the largest font
-    // that wraps to <=2 lines within the section's own fixed width, so it
-    // never jitters in size as the section scrolls through the window.
+    // sized once per section (see computeSectionLayout) to whatever single-
+    // line font size makes it span the section's own fixed width end to
+    // end, so it never jitters in size as the section scrolls through the
+    // window.
     //
     // Left-aligned starting at the section's own start-x, not centered:
     // the section's width was exactly what the font size was fit to, so
-    // left-aligning keeps every line's leading edge inside that width
-    // rather than needing separate centering math per line.
+    // left-aligning already lands the line's trailing edge at the
+    // section's own end-x too, without needing separate centering math.
     ctx.fillStyle = TIER_COLOR.green;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     for (const section of sectionList) {
       if (section.endSec < rangeStart || section.startSec > rangeEnd) continue;
       const layout = sectionLayouts.get(section.id);
-      if (!layout || !layout.lines.length) continue;
+      if (!layout || !layout.text) continue;
       const x = timeToX(section.startSec, nowSec, w);
       ctx.font = `bold ${layout.fontPx}px ${SECTION_FONT_FAMILY}`;
       const lineHeight = layout.fontPx * SECTION_LINE_HEIGHT_RATIO;
-      const blockHeight = layout.lines.length * lineHeight;
       const bandTop = h - LYRIC_BAND_HEIGHT;
-      const startY = bandTop + Math.max(0, (LYRIC_BAND_HEIGHT - blockHeight) / 2);
-      layout.lines.forEach((line, i) => ctx.fillText(line, x, startY + i * lineHeight));
+      const startY = bandTop + Math.max(0, (LYRIC_BAND_HEIGHT - lineHeight) / 2);
+      // Horizontal-only stretch/squeeze (see fitSectionText) applied via a
+      // scale transform around the line's own start point, not baked into
+      // the font size, so it widens/narrows the line without affecting its
+      // height/readability.
+      ctx.save();
+      ctx.translate(x, startY);
+      ctx.scale(layout.scaleX, 1);
+      ctx.fillText(layout.text, 0, 0);
+      ctx.restore();
     }
     ctx.textBaseline = 'alphabetic';
 
