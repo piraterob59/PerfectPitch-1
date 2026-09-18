@@ -109,7 +109,10 @@ const SUGGESTED_SECTION_GAP_SEC = 1.5;
 // neighbor) — a stray voiced blip inside a long instrumental gap is far
 // more likely a mic/detection artifact than an actual song section, and a
 // section this brief wouldn't be useful to type a lyric line into anyway.
-const MIN_SUGGESTED_SECTION_SEC = 3;
+// Lowered from 3s: real short sections (under 3s but still deliberate
+// song parts) were being dropped outright, per live user testing across
+// already-sectioned songs.
+const MIN_SUGGESTED_SECTION_SEC = 1.75;
 
 // One-time starting point for the Sections panel's "Suggest Sections"
 // button: splits the song's voiced pitch data into candidate verse/chorus-

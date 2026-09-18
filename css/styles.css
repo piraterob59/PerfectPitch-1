@@ -248,6 +248,7 @@ body {
   margin: 16px 0 6px;
 }
 .section-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.section-controls .btn { padding: 10px 12px; }
 .section-pending-label { font-size: 12px; color: var(--text-dim); flex-basis: 100%; min-height: 14px; }
 .section-edit-error { font-size: 12px; color: var(--bad); flex-basis: 100%; }
 
