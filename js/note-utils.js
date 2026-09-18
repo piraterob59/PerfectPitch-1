@@ -104,7 +104,11 @@ export function computeVocalSections(voicedPoints) {
 // the much shorter breath/consonant gaps MAX_INTERPOLATION_GAP_SEC (0.5s)
 // is tuned for — splitting on that shorter gap here would produce a
 // section per phrase, not per song part.
-const SUGGESTED_SECTION_GAP_SEC = 1.5;
+// Lowered from 1.5s: real section breaks in "The Wind" were only ~1s
+// apart, well under the old threshold, so consecutive sections were
+// merging into one instead of splitting. 0.8s still sits comfortably above
+// MAX_INTERPOLATION_GAP_SEC's breath gaps.
+const SUGGESTED_SECTION_GAP_SEC = 0.8;
 // Drops a run this short from the suggestions entirely (not merged into a
 // neighbor) — a stray voiced blip inside a long instrumental gap is far
 // more likely a mic/detection artifact than an actual song section, and a
