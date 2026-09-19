@@ -187,7 +187,33 @@ const STATUS_LABELS = {
 // false and makes the delete button look broken.
 let pendingDeleteId = null;
 
+function formatDuration(sec) {
+  const totalMin = Math.round(sec / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (sec > 0 && totalMin === 0) return '<1m';
+  return `${m}m`;
+}
+
+// Total recorded singing time (sum of attempt durations) across all songs —
+// only counts takes actually recorded via Start Singing, not time the
+// practice screen merely sat open.
+async function renderPracticeTotal() {
+  const attempts = await store.getAttemptTimes();
+  if (!attempts.length) { practiceTotalEl.hidden = true; return; }
+  const total = attempts.reduce((sum, a) => sum + (a.durationSec || 0), 0);
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const today = attempts
+    .filter((a) => a.startedAt >= startOfToday)
+    .reduce((sum, a) => sum + (a.durationSec || 0), 0);
+  practiceTotalEl.textContent =
+    `Practice time: ${formatDuration(total)} total · ${formatDuration(today)} today · ${attempts.length} attempt${attempts.length === 1 ? '' : 's'}`;
+  practiceTotalEl.hidden = false;
+}
+
 async function renderLibrary() {
+  renderPracticeTotal();
   const songs = await store.getAllSongs();
   songs.sort((a, b) => b.createdAt - a.createdAt);
   songListEl.innerHTML = '';
@@ -347,6 +373,7 @@ async function importSong(file) {
 // --- Practice ---
 
 const practiceTitleEl = document.getElementById('practice-title');
+const practiceTotalEl = document.getElementById('practice-total');
 const practiceToleranceEl = document.getElementById('practice-tolerance-badge');
 const practiceToleranceRowEl = document.getElementById('practice-tolerance-row');
 const practiceToleranceSliderEl = document.getElementById('practice-tolerance-slider');

@@ -105,6 +105,8 @@ body {
 .song-row-confirm-cancel,
 .song-row-confirm-delete { flex-shrink: 0; padding: 6px 12px; font-size: 13px; }
 
+.practice-total { color: var(--text-dim); font-size: 13px; margin: 0 0 12px; }
+
 .empty-state { color: var(--text-dim); text-align: center; margin-top: 40px; }
 
 .processing-panel, .practice-panel, .settings-panel {

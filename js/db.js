@@ -273,6 +273,27 @@ class Store {
     return attempts.sort((a, b) => b.startedAt - a.startedAt); // newest first
   }
 
+  // Just when/how long each attempt was, across every song — for the
+  // Library's practice-time total. A cursor keeps the (large) recorded video
+  // blobs from being materialized the way getAll() would.
+  async getAttemptTimes() {
+    const db = await this.db();
+    const t = tx(db, 'attempts', 'readonly');
+    const rows = [];
+    await new Promise((resolve, reject) => {
+      const req = t.objectStore('attempts').openCursor();
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return resolve();
+        const { songId, startedAt, durationSec } = cursor.value;
+        rows.push({ songId, startedAt, durationSec });
+        cursor.continue();
+      };
+    });
+    return rows;
+  }
+
   async deleteAttempt(id) {
     const db = await this.db();
     const t = tx(db, 'attempts', 'readwrite');
