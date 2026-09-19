@@ -7,7 +7,7 @@
 // which is trimmed to a short trailing window for rendering performance —
 // scoring needs the full singing-session history, not just what's on screen.
 
-import { centsOffPitch, interpolateTargetMidi, pitchTier, TIER_SCORE, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
+import { centsOffPitch, freqToMidi, interpolateTargetMidi, pitchTier, TIER_SCORE, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
 
 export function createAccuracyTracker(pitchTimeline, initialSections = [], { toleranceCents = 5, rollingWindowSec = 5 } = {}) {
   const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
@@ -42,6 +42,8 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
   // without meaningfully delaying real singing.
   let voicedStreak = 0;
   const REQUIRED_VOICED_STREAK = 3;
+  let recentOctaves = []; // { timeSec, shift }
+  const OCTAVE_WINDOW_SEC = 2;
 
   function setTolerance(cents) {
     tolerance = cents;
@@ -97,6 +99,10 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
     if (Math.abs(cents) > MAX_SCOREABLE_CENTS_OFF) { voicedStreak = 0; return; }
     voicedStreak++;
     if (voicedStreak < REQUIRED_VOICED_STREAK) return;
+    // Whole octaves the singer is away from the reference: the part of the
+    // raw pitch difference that centsOffPitch folded away.
+    const shift = Math.round(((freqToMidi(freqHz) - targetMidi) * 100 - cents) / 1200);
+    recentOctaves.push({ timeSec, shift });
     const score = TIER_SCORE[pitchTier(cents, tolerance)];
     total++;
     sumScore += score;
@@ -144,16 +150,35 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
     }));
   }
 
+  // Octave shift (whole octaves, negative = singing below the reference)
+  // that most of the last OCTAVE_WINDOW_SEC of scored samples agree on, or
+  // null if there are none — a majority vote so one stray harmonic-jump
+  // frame can't flicker the indicator.
+  function getOctaveShift(nowSec) {
+    const cutoff = nowSec - OCTAVE_WINDOW_SEC;
+    while (recentOctaves.length && recentOctaves[0].timeSec < cutoff) recentOctaves.shift();
+    if (!recentOctaves.length) return null;
+    const counts = new Map();
+    let best = null;
+    for (const { shift } of recentOctaves) {
+      const n = (counts.get(shift) || 0) + 1;
+      counts.set(shift, n);
+      if (best === null || n > counts.get(best)) best = shift;
+    }
+    return best;
+  }
+
   function reset() {
     sumScore = 0;
     total = 0;
     recentSamples = [];
+    recentOctaves = [];
     for (const s of sectionStats) { s.sumScore = 0; s.count = 0; }
     voicedStreak = 0;
   }
 
   return {
-    addSample, getAccuracy, getRollingAccuracy, getSectionBreakdown, setTolerance, reset,
+    addSample, getAccuracy, getRollingAccuracy, getOctaveShift, getSectionBreakdown, setTolerance, reset,
     addSection, removeSection, updateSectionBounds, updateSectionLabel,
   };
 }

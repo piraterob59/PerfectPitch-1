@@ -382,6 +382,7 @@ const startSingingBtn = document.getElementById('start-singing-btn');
 const micStatusEl = document.getElementById('mic-status');
 const micLevelRowEl = document.getElementById('mic-level-row');
 const micLevelFillEl = document.getElementById('mic-level-fill');
+const octaveIndicatorEl = document.getElementById('octave-indicator');
 const accuracyDisplayEl = document.getElementById('accuracy-display');
 const sectionPanelEl = document.getElementById('section-panel');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
@@ -458,6 +459,19 @@ function updateMicLevelMeter(rmsLevel) {
   const pct = Math.max(0, Math.min(100, (rmsLevel / MIC_LEVEL_METER_MAX_RMS) * 100));
   micLevelFillEl.style.width = `${pct}%`;
   micLevelFillEl.classList.toggle('mic-level-silent', rmsLevel < MIC_LEVEL_SILENCE_RMS);
+}
+
+// shift: whole octaves relative to the reference (negative = below), or null
+// when nothing scoreable has been sung recently.
+function updateOctaveIndicator(shift) {
+  let text = 'Octave: --';
+  if (shift === 0) text = 'Octave: same';
+  else if (shift !== null) {
+    const n = Math.abs(shift);
+    text = `Octave: ${n} ${shift < 0 ? 'lower' : 'higher'}`;
+  }
+  octaveIndicatorEl.textContent = text;
+  octaveIndicatorEl.classList.toggle('octave-shifted', shift !== null && shift !== 0);
 }
 
 // Accepts "M:SS" (matching formatTime's own output, so round-tripping
@@ -1511,6 +1525,7 @@ startSingingBtn.addEventListener('click', async () => {
         const t = Math.max(0, session.player.currentTime - micLatencySec);
         session.visualizer.pushLiveSample(t, freqHz, confidence);
         session.accuracyTracker.addSample(t, freqHz);
+        updateOctaveIndicator(session.accuracyTracker.getOctaveShift(t));
       },
     });
     if (practiceSession !== session) { micSession.stop(); return; } // torn down while awaiting permission
@@ -1523,6 +1538,7 @@ startSingingBtn.addEventListener('click', async () => {
     accuracyDisplayEl.hidden = false;
     micLevelRowEl.hidden = false;
     updateMicLevelMeter(0);
+    updateOctaveIndicator(null);
     accuracyDisplayEl.textContent = formatAccuracyDisplay(null, null);
     accuracyDisplayEl.className = 'accuracy-display';
 

@@ -237,6 +237,7 @@ body {
 
 .mic-level-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .mic-level-label { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+.mic-level-meter { flex: 3 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .mic-level-track {
   flex: 1;
   height: 8px;
@@ -254,6 +255,9 @@ body {
      so the meter reads as instantaneous level, not a lagging animation. */
 }
 .mic-level-fill.mic-level-silent { background: var(--text-dim); }
+
+.octave-indicator { flex: 1 1 0; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-dim); line-height: 1.2; }
+.octave-indicator.octave-shifted { color: var(--warn); }
 
 .accuracy-display { color: var(--good); font-size: 15px; font-weight: 600; margin-top: 8px; }
 .accuracy-display.accuracy-low { color: var(--bad); }
