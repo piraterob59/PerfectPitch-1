@@ -1,6 +1,6 @@
 {
-  "name": "PerfectPitch",
-  "short_name": "PerfectPitch",
+  "name": "PitchPerfect",
+  "short_name": "PitchPerfect",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

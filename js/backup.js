@@ -71,7 +71,7 @@ export async function downloadBackup({ onProgress } = {}) {
   const a = document.createElement('a');
   const stamp = new Date(backup.exportedAt).toISOString().slice(0, 10);
   a.href = url;
-  a.download = `perfectpitch-backup-${stamp}.json`;
+  a.download = `pitchperfect-backup-${stamp}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -90,7 +90,7 @@ export async function readBackupFile(file) {
     throw new Error('That file isn’t valid JSON.');
   }
   if (!backup || backup.app !== BACKUP_APP_ID || !backup.stores) {
-    throw new Error('That file doesn’t look like a PerfectPitch backup.');
+    throw new Error('That file doesn’t look like a PitchPerfect backup.');
   }
   return backup;
 }
