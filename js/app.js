@@ -54,37 +54,19 @@ function registerServiceWorker() {
 
 // --- Settings ---
 
-const toleranceSliderEl = document.getElementById('tolerance-slider');
-const toleranceValueEl = document.getElementById('tolerance-value');
 const returnToSongBtn = document.getElementById('return-to-song-btn');
 
-async function loadSettings() {
-  const saved = await store.getMeta(TOLERANCE_META_KEY);
-  const cents = saved ?? DEFAULT_TOLERANCE_CENTS;
-  toleranceSliderEl.value = cents;
-  toleranceValueEl.textContent = cents;
-}
-
 function wireSettings() {
-  toleranceSliderEl.addEventListener('input', () => {
-    toleranceValueEl.textContent = toleranceSliderEl.value;
-    // Applies immediately if a practice session is already running, rather
-    // than only taking effect the next time a song is opened — keeps the
-    // dot colors and the score's tier boundary in agreement with each other.
-    if (practiceSession) {
-      const cents = Number(toleranceSliderEl.value);
-      practiceSession.accuracyTracker.setTolerance(cents);
-      practiceSession.visualizer.setTolerance(cents);
-      practiceSession.toleranceCents = cents;
-      practiceToleranceEl.textContent = `±${cents}¢`;
-    }
-  });
-  toleranceSliderEl.addEventListener('change', () => {
-    store.setMeta(TOLERANCE_META_KEY, Number(toleranceSliderEl.value));
-  });
   returnToSongBtn.addEventListener('click', () => {
     if (practiceSession) switchView('practice');
   });
+}
+
+// Pitch accuracy target is per song (song.toleranceCents). Songs saved before
+// that existed fall back to the old app-wide setting (TOLERANCE_META_KEY),
+// then the default.
+async function toleranceForSong(song) {
+  return song.toleranceCents ?? (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
 }
 
 // --- Backup ---
@@ -169,7 +151,6 @@ function wireBackup() {
       // and land back on a freshly rendered Library, same as the tabbar's
       // own library click already does.
       stopPracticeSession();
-      await loadSettings();
       await renderLibrary();
       switchView('library');
       showBackupStatus('Backup restored.');
@@ -367,6 +348,29 @@ async function importSong(file) {
 
 const practiceTitleEl = document.getElementById('practice-title');
 const practiceToleranceEl = document.getElementById('practice-tolerance-badge');
+const practiceToleranceRowEl = document.getElementById('practice-tolerance-row');
+const practiceToleranceSliderEl = document.getElementById('practice-tolerance-slider');
+const practiceToleranceValueEl = document.getElementById('practice-tolerance-value');
+
+practiceToleranceEl.addEventListener('click', () => {
+  practiceToleranceRowEl.hidden = !practiceToleranceRowEl.hidden;
+});
+practiceToleranceSliderEl.addEventListener('input', () => {
+  const cents = Number(practiceToleranceSliderEl.value);
+  practiceToleranceValueEl.textContent = cents;
+  practiceToleranceEl.textContent = `±${cents}¢`;
+  // Applies immediately, so dot colors and the score's tier boundary agree.
+  if (practiceSession) {
+    practiceSession.accuracyTracker.setTolerance(cents);
+    practiceSession.visualizer.setTolerance(cents);
+    practiceSession.toleranceCents = cents;
+  }
+});
+practiceToleranceSliderEl.addEventListener('change', async () => {
+  if (!practiceSession) return;
+  const song = await store.getSong(practiceSession.songId);
+  if (song) await store.putSong({ ...song, toleranceCents: Number(practiceToleranceSliderEl.value) });
+});
 const pitchCanvasEl = document.getElementById('pitch-canvas');
 const seekBarEl = document.getElementById('seek-bar');
 const seekCurrentTimeEl = document.getElementById('seek-current-time');
@@ -1231,8 +1235,11 @@ async function openPractice(songId) {
   markSectionEndBtn.disabled = true;
   sectionPendingLabelEl.textContent = '';
 
-  const toleranceCents = (await store.getMeta(TOLERANCE_META_KEY)) ?? DEFAULT_TOLERANCE_CENTS;
+  const toleranceCents = await toleranceForSong(song);
   practiceToleranceEl.textContent = `±${toleranceCents}¢`;
+  practiceToleranceSliderEl.value = toleranceCents;
+  practiceToleranceValueEl.textContent = toleranceCents;
+  practiceToleranceRowEl.hidden = true;
   const player = createPlayer(instrumentalStem.blob);
   // User-marked verse/phrase boundaries (see the Sections panel's Mark
   // Start/End buttons) — replaced an earlier silence-gap auto-detection
@@ -1412,6 +1419,10 @@ wireHoldToRepeat(attemptSeekNudgeFwdBtn, () => stepAttemptSeek(SEEK_NUDGE_SEC));
 function setSingingLayout(isSinging) {
   sectionPanelEl.hidden = isSinging;
   pitchCanvasEl.classList.toggle('singing', isSinging);
+  // Locked while singing so one attempt is scored against a single target,
+  // which is what gets recorded with it.
+  practiceToleranceEl.disabled = isSinging;
+  if (isSinging) practiceToleranceRowEl.hidden = true;
   if (practiceSession) practiceSession.visualizer.resize();
 }
 
@@ -1691,7 +1702,6 @@ async function init() {
   wireSettings();
   wireBackup();
   registerServiceWorker();
-  await loadSettings();
   await renderLibrary();
 }
 

@@ -41,8 +41,12 @@
       <div class="practice-panel">
         <h2 class="practice-title-heading">
           <button id="view-attempts-btn" class="btn btn-secondary attempts-nav-btn">View Attempts</button>
-          <span id="practice-title">Song title</span><span id="practice-tolerance-badge" class="tolerance-badge"></span>
+          <span id="practice-title">Song title</span><button id="practice-tolerance-badge" class="tolerance-badge" type="button" title="Adjust this song's pitch accuracy target"></button>
         </h2>
+        <div id="practice-tolerance-row" class="practice-tolerance-row" hidden>
+          <label for="practice-tolerance-slider">Pitch accuracy target for this song: <span id="practice-tolerance-value">5</span> cents</label>
+          <input id="practice-tolerance-slider" class="slider tolerance-slider" type="range" min="5" max="50" step="1" value="5" />
+        </div>
         <canvas id="pitch-canvas"></canvas>
         <div class="seek-row">
           <span id="seek-current-time" class="seek-time">0:00</span>
@@ -112,15 +116,10 @@
       <div class="settings-panel">
         <h2>Settings</h2>
         <button id="return-to-song-btn" class="btn btn-link" hidden>Return to Song</button>
-        <label class="tolerance-label" for="tolerance-slider">
-          Pitch accuracy target: <span id="tolerance-value">5</span> cents
-        </label>
-        <input id="tolerance-slider" class="slider tolerance-slider" type="range" min="5" max="50" step="1" value="5" />
         <p class="settings-note">
-          How close (in cents — 100ths of a semitone) your sung pitch needs to land to the
-          original vocal's pitch to color green and count as a full-credit hit. Notes within 50
-          cents color yellow and count as half credit; anything further is red and counts as a
-          miss. Lower is stricter.
+          The pitch accuracy target is set per song: tap the "±N¢" next to the song
+          title on the practice screen to change it. Each recorded attempt keeps the
+          target it was scored with.
         </p>
 
         <h2>Backup</h2>

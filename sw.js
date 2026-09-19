@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pitchperfect-v86';
+const CACHE_NAME = 'pitchperfect-v87';
 const APP_SHELL = [
   './',
   './index.html',

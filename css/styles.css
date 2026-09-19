@@ -130,7 +130,13 @@ body {
 
 .error-text { color: var(--bad); margin-top: 12px; }
 
-.tolerance-badge { color: var(--accent); font-size: 14px; font-weight: 600; margin-left: 8px; }
+.tolerance-badge {
+  color: var(--accent); font-size: 14px; font-weight: 600; margin-left: 8px;
+  background: var(--accent-dim); border: none; border-radius: 6px; padding: 2px 8px; cursor: pointer;
+}
+.tolerance-badge:disabled { opacity: 0.5; cursor: default; }
+.practice-tolerance-row { margin-top: 8px; font-size: 13px; }
+.practice-tolerance-row .tolerance-slider { width: 100%; margin-top: 8px; }
 
 /* flow-root (not overflow:hidden) so the floated button's height is
    included when sizing this box, without clipping anything that might
