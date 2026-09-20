@@ -65,16 +65,20 @@ export async function uploadFile(file) {
 // fidelity — analyze.js runs pitch detection on it, and separation
 // artifacts are more likely to confuse that than to matter for karaoke
 // listening.
+//
+// `leadBack: true` adds `multivocal: 'lead_back'`, which asks LALAL.AI to
+// split the vocals into a lead stem (label "vocals@0") and a backing/harmony
+// stem ("vocals@1", only present if the song has one) instead of one
+// combined vocals track -- see parseTracks.
 export async function startSplitTask(sourceId, {
-  stem = 'vocals', extractionLevel = 'clear_cut', splitter = 'auto',
+  stem = 'vocals', extractionLevel = 'clear_cut', splitter = 'auto', leadBack = false,
 } = {}) {
+  const presets = { stem, extraction_level: extractionLevel, splitter };
+  if (leadBack) presets.multivocal = 'lead_back';
   const result = await proxyFetch('/proxy/split', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      source_id: sourceId,
-      presets: { stem, extraction_level: extractionLevel, splitter },
-    }),
+    body: JSON.stringify({ source_id: sourceId, presets }),
   });
   return result.task_id;
 }
@@ -147,17 +151,28 @@ export async function deleteSource(sourceId) {
 function parseTracks(result) {
   const tracks = result?.tracks || [];
   const norm = (s) => String(s || '').trim().toLowerCase();
-  const vocals = tracks.find((t) => /^vocals?$/.test(norm(t.label)));
-  const instrumental = tracks.find((t) => t !== vocals && /^no.?vocals?$|instrumental|back|accompaniment|music/.test(norm(t.label)));
+  // A plain split labels its stem "vocals"; a lead/back split labels the
+  // lead "vocals@0" and any backing/harmony stem "vocals@1".
+  const vocals = tracks.find((t) => /^vocals?(@0)?$/.test(norm(t.label)));
+  const backing = tracks.find((t) => /^vocals?@1$/.test(norm(t.label)));
+  const instrumental =
+    tracks.find((t) => /^no_?vocals?$/.test(norm(t.label))) ||
+    tracks.find((t) => t !== vocals && t !== backing && /instrumental|accompaniment|music/.test(norm(t.label)));
   if (!vocals || !instrumental) {
     throw new LalalRequestError(
       `Could not identify vocals/instrumental tracks in split result. Labels seen: ${tracks.map((t) => JSON.stringify(t.label)).join(', ') || '(none)'}`
     );
   }
-  return { vocalsUrl: vocals.url, instrumentalUrl: instrumental.url };
+  return { vocalsUrl: vocals.url, backingUrl: backing ? backing.url : null, instrumentalUrl: instrumental.url };
 }
 
 // High-level orchestration used by app.js: upload -> split -> poll -> download.
+//
+// Asks for a lead/back split first; if LALAL.AI rejects that request outright
+// (a 4xx, e.g. the option isn't available on this account), falls back to the
+// plain single-vocals split so importing still works, just without a separate
+// harmony line. backingBlob is null when the song has no backing vocals (or
+// on that fallback).
 export async function separateVocals(file, { onProgress } = {}) {
   assertConfigured();
   const progress = (phase, pct) => onProgress && onProgress({ phase, pct });
@@ -167,23 +182,30 @@ export async function separateVocals(file, { onProgress } = {}) {
   progress('uploading', 100);
 
   progress('separating', 0);
-  const taskId = await startSplitTask(sourceId, { stem: 'vocals' });
+  let taskId;
+  try {
+    taskId = await startSplitTask(sourceId, { stem: 'vocals', leadBack: true });
+  } catch (err) {
+    if (!(err instanceof LalalRequestError) || !err.status || err.status < 400 || err.status >= 500) throw err;
+    taskId = await startSplitTask(sourceId, { stem: 'vocals' });
+  }
   const result = await pollTaskUntilDone(taskId, {
     onStatus: (status, pct) => progress('separating', status === 'progress' ? (pct ?? 10) : 10),
   });
   progress('separating', 100);
 
   progress('downloading_stems', 0);
-  const { vocalsUrl, instrumentalUrl } = parseTracks(result);
-  const [vocalsBlob, instrumentalBlob] = await Promise.all([
+  const { vocalsUrl, backingUrl, instrumentalUrl } = parseTracks(result);
+  const [vocalsBlob, instrumentalBlob, backingBlob] = await Promise.all([
     downloadTrack(vocalsUrl),
     downloadTrack(instrumentalUrl),
+    backingUrl ? downloadTrack(backingUrl) : Promise.resolve(null),
   ]);
   progress('downloading_stems', 100);
 
   deleteSource(sourceId); // fire-and-forget cleanup, not awaited
 
-  return { vocalsBlob, instrumentalBlob, taskId };
+  return { vocalsBlob, backingBlob, instrumentalBlob, taskId };
 }
 
 export { LalalConfigError, LalalRequestError };

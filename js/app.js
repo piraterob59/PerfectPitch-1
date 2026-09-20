@@ -216,6 +216,7 @@ async function renderLibrary() {
   renderPracticeTotal();
   const songs = await store.getAllSongs();
   songs.sort((a, b) => b.createdAt - a.createdAt);
+  const songsWithBacking = new Set((await store.getAllBackingSongIds()));
   songListEl.innerHTML = '';
   libraryEmptyEl.hidden = songs.length > 0;
   for (const song of songs) {
@@ -243,6 +244,7 @@ async function renderLibrary() {
       li.innerHTML = `
         <span class="song-row-title"></span>
         <span class="song-row-status status-${song.status}"></span>
+        ${song.status === 'ready' && !songsWithBacking.has(song.id) ? '<button class="song-row-resplit" aria-label="Split lead and harmony" title="Re-import the original file to split lead and harmony vocals (uses LALAL.AI credits)">Split harmony</button>' : ''}
         ${song.status === 'ready' ? '<button class="song-row-reanalyze" aria-label="Re-analyze pitch" title="Re-analyze pitch">&#8635;</button>' : ''}
         <button class="song-row-delete" aria-label="Delete song" title="Delete">&times;</button>
       `;
@@ -272,6 +274,11 @@ async function renderLibrary() {
         song.updatedAt = Date.now();
         await store.putSong(song);
         await showProcessing(song.id);
+      });
+      li.querySelector('.song-row-resplit')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resplitSongId = song.id;
+        resplitInput.click();
       });
       li.querySelector('.song-row-delete').addEventListener('click', (e) => {
         e.stopPropagation(); // don't also trigger the row's openSong click
@@ -341,7 +348,14 @@ async function importSong(file) {
   };
   await store.putSong(song);
   await showProcessing(song.id);
+  await separateAndAnalyze(song, file);
+}
 
+// Upload -> LALAL.AI lead/back split -> store stems -> analyze pitch, for a
+// brand-new import or a re-split of a song already in the library (the
+// latter keeps its sections, lyrics, attempts, and settings; only the
+// stems and pitch timeline are replaced).
+async function separateAndAnalyze(song, file) {
   const onProgress = ({ phase, pct }) => {
     song.status = phase;
     processingStatusEl.textContent = STATUS_LABELS[phase] || phase;
@@ -349,10 +363,14 @@ async function importSong(file) {
   };
 
   try {
-    const { vocalsBlob, instrumentalBlob, taskId } = await separateVocals(file, { onProgress });
+    const { vocalsBlob, backingBlob, instrumentalBlob, taskId } = await separateVocals(file, { onProgress });
     song.lalalaiTaskId = taskId;
     await store.putStem({ songId: song.id, kind: 'vocals', blob: vocalsBlob, mimeType: vocalsBlob.type });
     await store.putStem({ songId: song.id, kind: 'instrumental', blob: instrumentalBlob, mimeType: instrumentalBlob.type });
+    // No backing stem (song has none, or the plain-split fallback ran):
+    // drop any old one so a re-split can't leave a stale harmony line.
+    if (backingBlob) await store.putStem({ songId: song.id, kind: 'backing', blob: backingBlob, mimeType: backingBlob.type });
+    else await store.deleteStem(song.id, 'backing');
 
     song.status = 'analyzing';
     processingStatusEl.textContent = STATUS_LABELS.analyzing;
@@ -361,6 +379,7 @@ async function importSong(file) {
       onProgress: (pct) => { processingBarEl.style.width = `${pct}%`; },
     });
     song.status = 'ready';
+    song.errorMessage = null;
   } catch (err) {
     song.status = 'failed';
     song.errorMessage = err.message || String(err);
@@ -370,10 +389,45 @@ async function importSong(file) {
   await showProcessing(song.id);
 }
 
+// "Split harmony" on an existing song: LALAL.AI needs the original audio
+// again (only the separated stems are stored), so this asks for the file.
+const resplitInput = document.getElementById('resplit-input');
+let resplitSongId = null;
+resplitInput.addEventListener('change', async () => {
+  const file = resplitInput.files[0];
+  resplitInput.value = '';
+  const songId = resplitSongId;
+  resplitSongId = null;
+  if (!file || !songId) return;
+  const song = await store.getSong(songId);
+  if (!song) return;
+  if (song.originalFileName && file.name !== song.originalFileName &&
+      !confirm(`This song was imported from "${song.originalFileName}", but you picked "${file.name}". Split it anyway? (Its sections and timing will only line up if it is the same recording.)`)) {
+    return;
+  }
+  song.status = 'uploading';
+  await store.putSong(song);
+  await showProcessing(song.id);
+  await separateAndAnalyze(song, file);
+});
+
 // --- Practice ---
 
 const practiceTitleEl = document.getElementById('practice-title');
 const practiceTotalEl = document.getElementById('practice-total');
+const practicePartRowEl = document.getElementById('practice-part-row');
+const practicePartSelectEl = document.getElementById('practice-part-select');
+practicePartSelectEl.addEventListener('change', async () => {
+  const session = practiceSession;
+  if (!session || !session.harmonyTimeline) return;
+  const part = practicePartSelectEl.value === 'harmony' ? 'harmony' : 'lead';
+  const target = part === 'harmony' ? session.harmonyTimeline : session.leadTimeline;
+  const other = part === 'harmony' ? session.leadTimeline : session.harmonyTimeline;
+  session.visualizer.setParts(target, other);
+  session.accuracyTracker.setTimeline(target);
+  const song = await store.getSong(session.songId);
+  if (song) await store.putSong({ ...song, singPart: part });
+});
 const practiceToleranceEl = document.getElementById('practice-tolerance-badge');
 const practiceToleranceRowEl = document.getElementById('practice-tolerance-row');
 const practiceToleranceSliderEl = document.getElementById('practice-tolerance-slider');
@@ -1277,8 +1331,18 @@ async function openPractice(songId) {
   // a fresh song, never a standing "redo this automatically" option that
   // could clobber sections/lyrics already typed in.
   suggestSectionsBtn.hidden = songSections.length > 0;
-  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline, sections: songSections, toleranceCents });
-  const accuracyTracker = createAccuracyTracker(pitchTimeline, songSections, { toleranceCents });
+  // Songs split into lead + backing vocals carry a second pitch line; the
+  // saved part (song.singPart) picks which one is the scored target, and the
+  // other is drawn as a faint reference line.
+  const leadTimeline = pitchTimeline;
+  const harmonyTimeline = pitchTimeline?.harmonyPoints?.length ? { points: pitchTimeline.harmonyPoints } : null;
+  const singPart = harmonyTimeline && song.singPart === 'harmony' ? 'harmony' : 'lead';
+  const targetTimeline = singPart === 'harmony' ? harmonyTimeline : leadTimeline;
+  const otherTimeline = harmonyTimeline ? (singPart === 'harmony' ? leadTimeline : harmonyTimeline) : null;
+  practicePartRowEl.hidden = !harmonyTimeline;
+  practicePartSelectEl.value = singPart;
+  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline: targetTimeline, secondaryTimeline: otherTimeline, sections: songSections, toleranceCents });
+  const accuracyTracker = createAccuracyTracker(targetTimeline, songSections, { toleranceCents });
 
   const voicedForGaps = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
   const skipRows = await store.getInstrumentalSkipsForSong(songId);
@@ -1287,7 +1351,7 @@ async function openPractice(songId) {
     .map((gap) => ({ ...gap, skip: skippedKeys.has(gap.startSec.toFixed(2)) }));
 
   practiceSession = {
-    songId, player, visualizer, accuracyTracker, toleranceCents, instrumentalGaps,
+    songId, player, visualizer, accuracyTracker, toleranceCents, instrumentalGaps, leadTimeline, harmonyTimeline,
     // Gaps already jumped past during the current playback pass, so the
     // skip only fires once per approach — reset on Reset/Redo Attempt
     // (see abandonCurrentTakeAndSeek) so seeking back to the start makes
@@ -1449,6 +1513,7 @@ function setSingingLayout(isSinging) {
   // Locked while singing so one attempt is scored against a single target,
   // which is what gets recorded with it.
   practiceToleranceEl.disabled = isSinging;
+  practicePartSelectEl.disabled = isSinging;
   if (isSinging) practiceToleranceRowEl.hidden = true;
   if (practiceSession) practiceSession.visualizer.resize();
 }

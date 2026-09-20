@@ -22,6 +22,7 @@
       <div class="library-header">
         <button id="import-btn" class="btn btn-primary">Import a song</button>
         <input id="import-input" type="file" accept="audio/*" hidden />
+        <input id="resplit-input" type="file" accept="audio/*" hidden />
       </div>
       <p id="practice-total" class="practice-total" hidden></p>
       <ul id="song-list" class="song-list"></ul>
@@ -47,6 +48,14 @@
         <div id="practice-tolerance-row" class="practice-tolerance-row" hidden>
           <label for="practice-tolerance-slider">Pitch accuracy target for this song: <span id="practice-tolerance-value">5</span> cents</label>
           <input id="practice-tolerance-slider" class="slider tolerance-slider" type="range" min="5" max="50" step="1" value="5" />
+        </div>
+        <div id="practice-part-row" class="practice-part-row" hidden>
+          <label for="practice-part-select">Sing along with:</label>
+          <select id="practice-part-select">
+            <option value="lead">Lead vocal</option>
+            <option value="harmony">Harmony (backing vocal)</option>
+          </select>
+          <span class="practice-part-note">The other part shows as a dashed line.</span>
         </div>
         <canvas id="pitch-canvas"></canvas>
         <div class="seek-row">

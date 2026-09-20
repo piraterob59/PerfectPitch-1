@@ -82,7 +82,7 @@ function fitSectionText(ctx, text, maxWidthPx) {
   return { fontPx, scaleX, text };
 }
 
-export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toleranceCents = 5 }) {
+export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = null, sections = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
   // Number.isFinite(p.midi) matters, not just freqHz !== null: minMidi/
   // maxMidi below take Math.min/max across every point's midi in one pass,
@@ -90,7 +90,13 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
   // which then makes midiToY() return NaN for literally every point, so
   // the entire band vanishes for the whole song, not just near the bad
   // sample. Confirmed live from one corrupted frame reaching this far.
-  const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null && Number.isFinite(p.midi));
+  const usablePoints = (timeline) => (timeline?.points || []).filter((p) => p.freqHz !== null && Number.isFinite(p.midi));
+  // `points` is the line being sung against (drawn as the colored band and
+  // used to grade live dots); `secondaryPoints` is the other part of a
+  // lead/harmony split, drawn as a faint reference line. Swapped via
+  // setParts().
+  let points = usablePoints(pitchTimeline);
+  let secondaryPoints = usablePoints(secondaryTimeline);
   // { id, startSec, endSec, text } — user-marked (see db.js's sections
   // store), sorted so render() can scan them in order alongside the pitch
   // points. Each section's best-fit text layout is cached in
@@ -106,10 +112,23 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
 
   let minMidi = 55;
   let maxMidi = 79;
-  if (points.length) {
-    const midis = points.map((p) => p.midi);
-    minMidi = Math.floor(Math.min(...midis) - 2);
-    maxMidi = Math.ceil(Math.max(...midis) + 2);
+  // Sized to both lines, so switching which one is "primary" never moves
+  // the vertical scale.
+  function computeRange() {
+    const all = points.concat(secondaryPoints);
+    if (!all.length) return;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const p of all) { if (p.midi < lo) lo = p.midi; if (p.midi > hi) hi = p.midi; }
+    minMidi = Math.floor(lo - 2);
+    maxMidi = Math.ceil(hi + 2);
+  }
+  computeRange();
+
+  function setParts(primaryTimeline, secondary) {
+    points = usablePoints(primaryTimeline);
+    secondaryPoints = usablePoints(secondary);
+    computeRange();
   }
 
   let liveSamples = []; // { timeSec, freqHz, confidence }
@@ -299,6 +318,29 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
     drawPitchBand(yellowHalfWidth, TIER_COLOR.yellow, 0.45);
     drawPitchBand(greenHalfWidth, TIER_COLOR.green, 0.55);
 
+    // The other part of a lead/harmony split, as a faint dashed line so it
+    // reads as context, not as something being scored.
+    if (secondaryPoints.length) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      let pen = false;
+      let lastT = null;
+      ctx.beginPath();
+      for (const p of secondaryPoints) {
+        if (p.timeSec < rangeStart - 0.5) continue;
+        if (p.timeSec > rangeEnd + 0.5) break;
+        const x = timeToX(p.timeSec, nowSec, w);
+        const y = midiToY(p.midi, h);
+        if (!pen || p.timeSec - lastT > MAX_INTERPOLATION_GAP_SEC) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        pen = true;
+        lastT = p.timeSec;
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // "now" line — drawn after the (semi-transparent) band so it stays
     // fully bright where it crosses it, not dulled by the fill underneath.
     const nowX = NOW_FRAC * w;
@@ -383,6 +425,6 @@ export function createVisualizer(canvasEl, { pitchTimeline, sections = [], toler
   return {
     resize, render, pushLiveSample, clearLiveSamples,
     addSection, removeSection, updateSectionText, updateSectionBounds,
-    setTolerance,
+    setTolerance, setParts,
   };
 }

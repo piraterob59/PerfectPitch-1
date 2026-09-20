@@ -10,7 +10,7 @@
 import { centsOffPitch, freqToMidi, interpolateTargetMidi, pitchTier, TIER_SCORE, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
 
 export function createAccuracyTracker(pitchTimeline, initialSections = [], { toleranceCents = 5, rollingWindowSec = 5 } = {}) {
-  const points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
+  let points = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
   let tolerance = toleranceCents;
   let sumScore = 0;
   let total = 0;
@@ -44,6 +44,11 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
   const REQUIRED_VOICED_STREAK = 3;
   let recentOctaves = []; // { timeSec, shift }
   const OCTAVE_WINDOW_SEC = 2;
+
+  // Swaps which pitch line samples are scored against (lead vs harmony).
+  function setTimeline(timeline) {
+    points = (timeline?.points || []).filter((p) => p.freqHz !== null);
+  }
 
   function setTolerance(cents) {
     tolerance = cents;
@@ -178,7 +183,7 @@ export function createAccuracyTracker(pitchTimeline, initialSections = [], { tol
   }
 
   return {
-    addSample, getAccuracy, getRollingAccuracy, getOctaveShift, getSectionBreakdown, setTolerance, reset,
+    addSample, getAccuracy, getRollingAccuracy, getOctaveShift, getSectionBreakdown, setTolerance, setTimeline, reset,
     addSection, removeSection, updateSectionBounds, updateSectionLabel,
   };
 }

@@ -87,15 +87,28 @@ export function analyzeSamples(samples, sampleRate) {
 }
 
 // Decodes the stored vocals stem for `songId`, analyzes it, and persists
-// the resulting pitch timeline via db.js.
+// the resulting pitch timeline via db.js. If the song also has a backing
+// (harmony) stem from a lead/back vocal split, that's analyzed the same way
+// and stored alongside as the harmony line.
 export async function analyzeSongVocals(songId, { onProgress } = {}) {
   const stem = await store.getStem(songId, 'vocals');
   if (!stem) throw new Error(`No vocals stem stored for song ${songId}`);
+  const backingStem = await store.getStem(songId, 'backing');
+  // Progress is split across whichever stems exist: lead gets the first
+  // half (or all of it, with no backing stem), harmony the rest.
+  const leadShare = backingStem ? 50 : 100;
   if (onProgress) onProgress(0);
   const { samples, sampleRate } = await decodeToMono(stem.blob);
-  if (onProgress) onProgress(50);
+  if (onProgress) onProgress(leadShare / 2);
   const { hopSec, points } = analyzeSamples(samples, sampleRate);
-  await store.putPitchTimeline(songId, points, hopSec);
+  let harmonyPoints;
+  if (backingStem) {
+    if (onProgress) onProgress(leadShare);
+    const decoded = await decodeToMono(backingStem.blob);
+    if (onProgress) onProgress(75);
+    harmonyPoints = analyzeSamples(decoded.samples, decoded.sampleRate).points;
+  }
+  await store.putPitchTimeline(songId, points, hopSec, harmonyPoints);
   if (onProgress) onProgress(100);
-  return { hopSec, points };
+  return { hopSec, points, harmonyPoints };
 }

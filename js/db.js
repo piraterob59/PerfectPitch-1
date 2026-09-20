@@ -172,6 +172,22 @@ class Store {
     return txDone(t, entry);
   }
 
+  // Ids of songs that have a backing (harmony) stem, for the Library's
+  // "Split harmony" button. Key-only cursor so no audio blobs are read.
+  async getAllBackingSongIds() {
+    const db = await this.db();
+    const t = tx(db, 'stems', 'readonly');
+    const keys = await reqToPromise(t.objectStore('stems').getAllKeys());
+    return keys.filter((k) => String(k).endsWith(':backing')).map((k) => String(k).slice(0, -':backing'.length));
+  }
+
+  async deleteStem(songId, kind) {
+    const db = await this.db();
+    const t = tx(db, 'stems', 'readwrite');
+    t.objectStore('stems').delete(`${songId}:${kind}`);
+    return txDone(t);
+  }
+
   async getStem(songId, kind) {
     const db = await this.db();
     const t = tx(db, 'stems', 'readonly');
@@ -185,10 +201,15 @@ class Store {
     return reqToPromise(idx.getAll(IDBKeyRange.only(songId)));
   }
 
-  async putPitchTimeline(songId, points, hopSec) {
+  // harmonyPoints: the backing/harmony line's own timeline (same point
+  // shape as `points`), present only for songs imported with a lead/back
+  // vocal split. Omitted otherwise, and since this replaces the whole row a
+  // re-analysis without a backing stem clears any old harmony line.
+  async putPitchTimeline(songId, points, hopSec, harmonyPoints) {
     const db = await this.db();
     const t = tx(db, 'pitchTimelines', 'readwrite');
     const entry = { songId, hopSec, points, createdAt: Date.now() };
+    if (harmonyPoints && harmonyPoints.length) entry.harmonyPoints = harmonyPoints;
     t.objectStore('pitchTimelines').put(entry);
     return txDone(t, entry);
   }
