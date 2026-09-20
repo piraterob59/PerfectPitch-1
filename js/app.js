@@ -355,10 +355,25 @@ async function importSong(file) {
 // brand-new import or a re-split of a song already in the library (the
 // latter keeps its sections, lyrics, attempts, and settings; only the
 // stems and pitch timeline are replaced).
-async function separateAndAnalyze(song, file) {
+//
+// `resplit`: the song is already usable, so its stored status stays 'ready'
+// throughout (progress is display-only). Otherwise an interrupted or failed
+// re-split -- a closed tab, a network error, a slow LALAL.AI task -- would
+// leave a perfectly good song stuck in "uploading"/"failed" and unopenable.
+async function separateAndAnalyze(song, file, { resplit = false } = {}) {
+  // A running clock next to the phase label, so a long LALAL.AI step reads
+  // as "still working, 3:20 in" rather than looking frozen.
+  const startedAt = Date.now();
+  let phaseLabel = STATUS_LABELS.uploading;
+  const renderStatus = () => {
+    processingStatusEl.textContent = `${phaseLabel} · ${formatTime((Date.now() - startedAt) / 1000)}`;
+  };
+  const clock = setInterval(renderStatus, 1000);
+  renderStatus();
   const onProgress = ({ phase, pct }) => {
-    song.status = phase;
-    processingStatusEl.textContent = STATUS_LABELS[phase] || phase;
+    if (!resplit) song.status = phase;
+    phaseLabel = STATUS_LABELS[phase] || phase;
+    renderStatus();
     processingBarEl.style.width = `${pct}%`;
   };
 
@@ -372,8 +387,9 @@ async function separateAndAnalyze(song, file) {
     if (backingBlob) await store.putStem({ songId: song.id, kind: 'backing', blob: backingBlob, mimeType: backingBlob.type });
     else await store.deleteStem(song.id, 'backing');
 
-    song.status = 'analyzing';
-    processingStatusEl.textContent = STATUS_LABELS.analyzing;
+    if (!resplit) song.status = 'analyzing';
+    phaseLabel = STATUS_LABELS.analyzing;
+    renderStatus();
     processingBarEl.style.width = '0%';
     await analyzeSongVocals(song.id, {
       onProgress: (pct) => { processingBarEl.style.width = `${pct}%`; },
@@ -381,12 +397,19 @@ async function separateAndAnalyze(song, file) {
     song.status = 'ready';
     song.errorMessage = null;
   } catch (err) {
-    song.status = 'failed';
+    if (!resplit) song.status = 'failed';
     song.errorMessage = err.message || String(err);
   }
+  clearInterval(clock);
   song.updatedAt = Date.now();
   await store.putSong(song);
   await showProcessing(song.id);
+  // A failed re-split leaves the song 'ready' (see above), but the error
+  // should still be visible on the screen the user is watching.
+  if (resplit && song.errorMessage) {
+    processingErrorEl.hidden = false;
+    processingErrorEl.textContent = `Splitting failed: ${song.errorMessage} — your song is unchanged.`;
+  }
 }
 
 // "Split harmony" on an existing song: LALAL.AI needs the original audio
@@ -405,10 +428,13 @@ resplitInput.addEventListener('change', async () => {
       !confirm(`This song was imported from "${song.originalFileName}", but you picked "${file.name}". Split it anyway? (Its sections and timing will only line up if it is the same recording.)`)) {
     return;
   }
-  song.status = 'uploading';
-  await store.putSong(song);
-  await showProcessing(song.id);
-  await separateAndAnalyze(song, file);
+  // Shown without touching the stored status (see separateAndAnalyze).
+  processingTitleEl.textContent = song.title;
+  processingStatusEl.textContent = STATUS_LABELS.uploading;
+  processingBarEl.style.width = '0%';
+  processingErrorEl.hidden = true;
+  switchView('processing');
+  await separateAndAnalyze(song, file, { resplit: true });
 });
 
 // --- Practice ---
