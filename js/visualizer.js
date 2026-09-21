@@ -141,12 +141,14 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
   function computeSectionLayout(section) {
     const widthCss = canvasEl.getBoundingClientRect().width;
     const pxPerSec = widthCss / WINDOW_SEC;
-    // Capped at the canvas's own width: a section longer than WINDOW_SEC is
-    // never fully on-screen at once regardless of font size, so sizing text
-    // to its full duration would just pick a huge font that's mostly
-    // clipped off-canvas at any given moment. Capping means even a long
-    // section gets text sized to actually fit one screenful.
-    const sectionWidthPx = Math.max(10, Math.min((section.endSec - section.startSec) * pxPerSec, widthCss));
+    // The section's full duration, even when that's wider than the canvas
+    // (a section longer than WINDOW_SEC): the line is meant to run from the
+    // section's start to its end, so a long one extends off-screen and
+    // scrolls through with the section rather than being squeezed into one
+    // screenful and stopping partway. The font height is bounded by the
+    // lyric band (see fitSectionText), so this stretches the line
+    // horizontally rather than blowing up its size.
+    const sectionWidthPx = Math.max(10, (section.endSec - section.startSec) * pxPerSec);
     return fitSectionText(ctx, section.text || '', sectionWidthPx);
   }
 
