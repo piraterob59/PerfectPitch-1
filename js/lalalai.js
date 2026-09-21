@@ -110,7 +110,12 @@ export async function pollTaskUntilDone(taskId, { intervalMs = 5000, timeoutMs =
     if (task.status !== 'progress') {
       throw new LalalRequestError(`LALAL.AI task failed with unexpected status: ${task.status}`);
     }
-    if (Date.now() - start > timeoutMs) throw new LalalRequestError('LALAL.AI task timed out');
+    if (Date.now() - start > timeoutMs) {
+      throw new LalalRequestError(
+        `LALAL.AI didn't finish within ${Math.round(timeoutMs / 60000)} minutes, so the app stopped waiting. ` +
+        'Credits may still have been used on their side. Try again in a little while.'
+      );
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
