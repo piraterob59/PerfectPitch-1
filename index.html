@@ -90,9 +90,14 @@
           </div>
           <ul id="section-list" class="section-list"></ul>
         </div>
-        <div id="instrumental-panel" hidden>
+        <div id="instrumental-panel">
           <p class="panel-label">Instrumental Breaks</p>
-          <p class="panel-note">Skip playback ahead in the checked breaks, leaving a 10s lead-in before the next vocal.</p>
+          <p class="panel-note">Skip playback ahead in the checked breaks. Long gaps (15s+ without a vocal) are detected automatically and leave a 10s lead-in before the next vocal; a break you mark yourself is skipped exactly as marked.</p>
+          <div class="section-controls">
+            <button id="mark-break-start-btn" class="btn btn-secondary" type="button">Break Start</button>
+            <button id="mark-break-end-btn" class="btn btn-secondary" type="button" disabled>Break End</button>
+            <span id="break-pending-label" class="section-pending-label"></span>
+          </div>
           <ul id="instrumental-list" class="instrumental-list"></ul>
         </div>
       </div>

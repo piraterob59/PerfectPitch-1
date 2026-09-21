@@ -501,6 +501,9 @@ const markSectionEndBtn = document.getElementById('mark-section-end-btn');
 const suggestSectionsBtn = document.getElementById('suggest-sections-btn');
 const instrumentalPanelEl = document.getElementById('instrumental-panel');
 const instrumentalListEl = document.getElementById('instrumental-list');
+const markBreakStartBtn = document.getElementById('mark-break-start-btn');
+const markBreakEndBtn = document.getElementById('mark-break-end-btn');
+const breakPendingLabelEl = document.getElementById('break-pending-label');
 const sectionPendingLabelEl = document.getElementById('section-pending-label');
 const sectionListEl = document.getElementById('section-list');
 const viewAttemptsBtn = document.getElementById('view-attempts-btn');
@@ -821,13 +824,19 @@ async function renderSectionList(songId) {
   });
 }
 
-// The detected-gaps list on practiceSession never changes shape after
-// openPractice builds it (only each gap's own `.skip` flag toggles), so
-// this just re-renders from that in-memory array rather than re-running
-// detection — cheap either way, but keeps a single source of truth.
+// A break's identity for the once-per-approach skip bookkeeping. Manual
+// breaks are keyed apart from detected gaps that start at the same time.
+function gapKey(gap) {
+  return `${gap.manual ? 'm' : ''}${gap.startSec.toFixed(2)}`;
+}
+
+// practiceSession.instrumentalGaps holds both the automatically detected
+// gaps and the user's manually marked breaks, sorted by start time. It only
+// changes shape when a break is added or removed (each break's own `.skip`
+// flag otherwise toggles in place), so this re-renders from that in-memory
+// array rather than re-running detection.
 function renderInstrumentalList(songId) {
   const gaps = practiceSession?.songId === songId ? practiceSession.instrumentalGaps : [];
-  instrumentalPanelEl.hidden = gaps.length === 0;
   instrumentalListEl.innerHTML = '';
   gaps.forEach((gap, i) => {
     const li = document.createElement('li');
@@ -835,25 +844,69 @@ function renderInstrumentalList(songId) {
     const durationSec = Math.round(gap.endSec - gap.startSec);
     li.innerHTML = `
       <input type="checkbox" class="instrumental-row-checkbox" id="instrumental-skip-${i}" />
-      <label class="instrumental-row-label" for="instrumental-skip-${i}">${formatTime(gap.startSec)}–${formatTime(gap.endSec)}</label>
+      <label class="instrumental-row-label" for="instrumental-skip-${i}">${formatTime(gap.startSec)}–${formatTime(gap.endSec)}${gap.manual ? ' <span class="instrumental-row-tag">manual</span>' : ''}</label>
       <span class="instrumental-row-duration">${durationSec}s</span>
+      ${gap.manual ? '<button type="button" class="instrumental-row-delete" aria-label="Remove this break" title="Remove this break">&times;</button>' : ''}
     `;
     const checkbox = li.querySelector('.instrumental-row-checkbox');
     checkbox.checked = gap.skip;
     checkbox.addEventListener('change', async () => {
       gap.skip = checkbox.checked;
-      if (checkbox.checked) {
+      if (gap.manual) {
+        await store.setInstrumentalSkip({ songId, startSec: gap.startSec, endSec: gap.endSec, manual: true, enabled: gap.skip });
+      } else if (checkbox.checked) {
         await store.setInstrumentalSkip({ songId, startSec: gap.startSec, endSec: gap.endSec });
       } else {
         await store.deleteInstrumentalSkip(songId, gap.startSec);
-        // Un-skipping a gap the current pass already jumped past should let
-        // it fire again if playback ever re-enters it (e.g. after a Reset).
-        if (practiceSession) practiceSession.skippedGapKeys.delete(gap.startSec.toFixed(2));
       }
+      // Un-skipping a break the current pass already jumped past should let
+      // it fire again if playback ever re-enters it (e.g. after a Reset).
+      if (!gap.skip && practiceSession) practiceSession.skippedGapKeys.delete(gapKey(gap));
+    });
+    li.querySelector('.instrumental-row-delete')?.addEventListener('click', async () => {
+      await store.deleteInstrumentalSkip(songId, gap.startSec, true);
+      if (practiceSession?.songId === songId) {
+        practiceSession.instrumentalGaps = practiceSession.instrumentalGaps.filter((g) => g !== gap);
+        practiceSession.skippedGapKeys.delete(gapKey(gap));
+      }
+      renderInstrumentalList(songId);
     });
     instrumentalListEl.appendChild(li);
   });
 }
+
+// Manual breaks: same mark-start / mark-end flow as Sections, for breaks the
+// automatic detection (a gap of 15s+ with no vocal) doesn't catch -- a short
+// solo, a held instrumental bridge with some stray detected pitch in it.
+let pendingBreakStart = null;
+markBreakStartBtn.addEventListener('click', () => {
+  if (!practiceSession) return;
+  pendingBreakStart = practiceSession.player.currentTime;
+  breakPendingLabelEl.textContent = `Start set at ${formatTime(pendingBreakStart)} — play or step to the end, then Break End.`;
+  markBreakEndBtn.disabled = false;
+});
+markBreakEndBtn.addEventListener('click', async () => {
+  if (!practiceSession || pendingBreakStart === null) return;
+  const session = practiceSession;
+  const startSec = pendingBreakStart;
+  const endSec = session.player.currentTime;
+  if (endSec - startSec < 1) {
+    breakPendingLabelEl.textContent = 'The break needs to be at least 1s long — move the end later.';
+    return;
+  }
+  pendingBreakStart = null;
+  markBreakEndBtn.disabled = true;
+  breakPendingLabelEl.textContent = '';
+  await store.setInstrumentalSkip({ songId: session.songId, startSec, endSec, manual: true, enabled: true });
+  if (practiceSession !== session) return;
+  const existing = session.instrumentalGaps.find((g) => g.manual && g.startSec.toFixed(2) === startSec.toFixed(2));
+  if (existing) { existing.endSec = endSec; existing.skip = true; } else {
+    session.instrumentalGaps.push({ startSec, endSec, manual: true, skip: true });
+    session.instrumentalGaps.sort((a, b) => a.startSec - b.startSec);
+  }
+  session.skippedGapKeys.delete(`m${startSec.toFixed(2)}`);
+  renderInstrumentalList(session.songId);
+});
 
 markSectionStartBtn.addEventListener('click', () => {
   if (!practiceSession) return;
@@ -1372,9 +1425,17 @@ async function openPractice(songId) {
 
   const voicedForGaps = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
   const skipRows = await store.getInstrumentalSkipsForSong(songId);
-  const skippedKeys = new Set(skipRows.map((r) => r.startSec.toFixed(2)));
+  const skippedKeys = new Set(skipRows.filter((r) => !r.manual).map((r) => r.startSec.toFixed(2)));
+  const manualBreaks = skipRows
+    .filter((r) => r.manual)
+    .map((r) => ({ startSec: r.startSec, endSec: r.endSec, manual: true, skip: r.enabled !== false }));
   const instrumentalGaps = findSkippableInstrumentalGaps(voicedForGaps)
-    .map((gap) => ({ ...gap, skip: skippedKeys.has(gap.startSec.toFixed(2)) }));
+    .map((gap) => ({ ...gap, skip: skippedKeys.has(gap.startSec.toFixed(2)) }))
+    .concat(manualBreaks)
+    .sort((a, b) => a.startSec - b.startSec);
+  pendingBreakStart = null;
+  markBreakEndBtn.disabled = true;
+  breakPendingLabelEl.textContent = '';
 
   practiceSession = {
     songId, player, visualizer, accuracyTracker, toleranceCents, instrumentalGaps, leadTimeline, harmonyTimeline,
@@ -1428,10 +1489,14 @@ async function openPractice(songId) {
     // won't re-trigger just from a rewind that lands back inside it.
     if (!player.paused) {
       for (const gap of session.instrumentalGaps) {
-        if (!gap.skip || session.skippedGapKeys.has(gap.startSec.toFixed(2))) continue;
-        const skipTargetSec = gap.endSec - INSTRUMENTAL_SKIP_LEAD_IN_SEC;
+        if (!gap.skip || session.skippedGapKeys.has(gapKey(gap))) continue;
+        // Detected gaps leave a lead-in before the next vocal; a manual break
+        // is skipped exactly as marked (mark its end earlier for a lead-in) --
+        // most manual breaks are shorter than the lead-in itself, which would
+        // otherwise leave nothing to skip.
+        const skipTargetSec = gap.manual ? gap.endSec : gap.endSec - INSTRUMENTAL_SKIP_LEAD_IN_SEC;
         if (player.currentTime >= gap.startSec && player.currentTime < skipTargetSec) {
-          session.skippedGapKeys.add(gap.startSec.toFixed(2));
+          session.skippedGapKeys.add(gapKey(gap));
           player.seek(skipTargetSec);
           break; // one skip per frame is plenty; the rest catch up next frame if needed
         }

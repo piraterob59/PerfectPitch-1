@@ -600,3 +600,18 @@ body {
 }
 
 .tab-btn.active { color: var(--accent); }
+
+.instrumental-row-tag { font-size: 11px; color: var(--accent); margin-left: 6px; }
+.instrumental-row-delete {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.instrumental-row-delete:hover { background: rgba(239, 68, 68, 0.15); color: var(--bad); }

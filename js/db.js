@@ -404,22 +404,32 @@ class Store {
     return reqToPromise(idx.getAll(IDBKeyRange.only(songId)));
   }
 
-  // Marks a detected instrumental gap to be skipped during playback — a
-  // plain put keyed by songId+startSec, not an add-then-look-up-the-id
-  // dance, since the caller (app.js) already knows the gap's own bounds
-  // from note-utils.js's detection and never needs a separate generated id.
-  async setInstrumentalSkip({ songId, startSec, endSec }) {
+  // Instrumental skips come in two kinds, both stored here keyed by songId +
+  // startSec:
+  //  - detected gaps (note-utils.js's findSkippableInstrumentalGaps): the
+  //    row's existence means "skip this one" and deleting it un-skips it;
+  //  - manual breaks the user marked themselves (`manual: true`): the row
+  //    IS the break, with `enabled` saying whether it's currently skipped,
+  //    and deleting the row removes the break itself. Manual ids carry an
+  //    `m:` marker so one can never collide with a detected gap that happens
+  //    to start at the same time.
+  static skipId(songId, startSec, manual) {
+    return `${songId}:${manual ? 'm:' : ''}${startSec.toFixed(2)}`;
+  }
+
+  async setInstrumentalSkip({ songId, startSec, endSec, manual = false, enabled = true }) {
     const db = await this.db();
     const t = tx(db, 'instrumentalSkips', 'readwrite');
-    const entry = { id: `${songId}:${startSec.toFixed(2)}`, songId, startSec, endSec, createdAt: Date.now() };
+    const entry = { id: Store.skipId(songId, startSec, manual), songId, startSec, endSec, createdAt: Date.now() };
+    if (manual) { entry.manual = true; entry.enabled = enabled; }
     t.objectStore('instrumentalSkips').put(entry);
     return txDone(t, entry);
   }
 
-  async deleteInstrumentalSkip(songId, startSec) {
+  async deleteInstrumentalSkip(songId, startSec, manual = false) {
     const db = await this.db();
     const t = tx(db, 'instrumentalSkips', 'readwrite');
-    t.objectStore('instrumentalSkips').delete(`${songId}:${startSec.toFixed(2)}`);
+    t.objectStore('instrumentalSkips').delete(Store.skipId(songId, startSec, manual));
     return txDone(t);
   }
 
