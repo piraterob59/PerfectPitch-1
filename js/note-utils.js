@@ -197,3 +197,108 @@ export function interpolateTargetMidi(points, t) {
   const frac = span > 0 ? (t - a.timeSec) / span : 0;
   return a.midi + (b.midi - a.midi) * frac;
 }
+
+// --- Word timing for section lyrics ---------------------------------------
+//
+// A section's lyric is typed as plain text with no per-word timing, so the
+// visualizer needs an estimate of when each word is actually sung. This
+// derives one from the pitch timeline alone (no speech recognition): words
+// are split into estimated syllables, syllable start times are spread evenly
+// across the section's *voiced* time (so silences between phrases don't
+// take a share), then each is snapped to the nearest real note onset found
+// in the pitch curve. Approximate by nature -- a held or melismatic word,
+// or a syllable-count miss, will be off -- but it tracks where the singing
+// actually happens far better than stretching one line across the section.
+
+// A gap this long inside a voiced run (a consonant, a breath) starts a new note.
+const NOTE_GAP_SEC = 0.06;
+// Pitch has to move this far from the running note pitch, and stay there for
+// a few frames, to count as a new note -- vibrato stays well inside it.
+const NOTE_SPLIT_SEMITONES = 0.8;
+// Only snap a syllable to an onset this close to its even-spacing position,
+// and never closer than MIN_SYLLABLE_SEC to the previous syllable.
+const SNAP_WINDOW_SEC = 0.15;
+const MIN_SYLLABLE_SEC = 0.05;
+
+// Rough English syllable count from vowel groups, with the common silent
+// endings ("love", "time", "loved") discounted. Never less than 1.
+export function countSyllables(word) {
+  const w = String(word).toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return 1;
+  let n = (w.match(/[aeiouy]+/g) || []).length;
+  if (n > 1 && /[^aeiouy]e$/.test(w) && !/le$/.test(w)) n--;
+  else if (n > 1 && /[^aeiouytd]ed$/.test(w)) n--;
+  return Math.max(1, n);
+}
+
+// Start times of distinct notes in a voiced-only, time-sorted run of points.
+function findNoteOnsets(voiced) {
+  const onsets = [];
+  let ref = null;
+  let lastT = null;
+  for (let i = 0; i < voiced.length; i++) {
+    const p = voiced[i];
+    const gap = lastT !== null && p.timeSec - lastT > NOTE_GAP_SEC;
+    if (ref === null || gap) {
+      onsets.push(p.timeSec);
+      ref = p.midi;
+    } else if (
+      i + 2 < voiced.length &&
+      Math.abs(p.midi - ref) > NOTE_SPLIT_SEMITONES &&
+      Math.abs(voiced[i + 1].midi - ref) > NOTE_SPLIT_SEMITONES &&
+      Math.abs(voiced[i + 2].midi - ref) > NOTE_SPLIT_SEMITONES
+    ) {
+      onsets.push(p.timeSec);
+      ref = p.midi;
+    } else {
+      ref = ref * 0.9 + p.midi * 0.1;
+    }
+    lastT = p.timeSec;
+  }
+  return onsets;
+}
+
+// Returns [{ text, startSec, endSec }] for each whitespace-separated word of
+// `text`, estimated to be sung within [startSec, endSec] of the given pitch
+// `points` (any pitch timeline's points; unvoiced ones are skipped).
+export function estimateWordTimes(text, startSec, endSec, points) {
+  const tokens = String(text || '').split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const voiced = points.filter((p) =>
+    p.timeSec >= startSec && p.timeSec <= endSec && p.freqHz !== null && Number.isFinite(p.midi));
+  const counts = tokens.map(countSyllables);
+  const total = counts.reduce((a, b) => a + b, 0);
+
+  const sylStarts = [];
+  if (voiced.length < 2) {
+    for (let k = 0; k < total; k++) sylStarts.push(startSec + ((endSec - startSec) * k) / total);
+  } else {
+    const onsets = findNoteOnsets(voiced);
+    let prev = -Infinity;
+    for (let k = 0; k < total; k++) {
+      let t = voiced[Math.min(voiced.length - 1, Math.floor((voiced.length * k) / total))].timeSec;
+      let best = null;
+      let bestD = SNAP_WINDOW_SEC;
+      for (const o of onsets) {
+        const d = Math.abs(o - t);
+        if (d < bestD && o >= prev + MIN_SYLLABLE_SEC) { best = o; bestD = d; }
+      }
+      if (best !== null) t = best;
+      if (t < prev + MIN_SYLLABLE_SEC) t = prev + MIN_SYLLABLE_SEC;
+      sylStarts.push(t);
+      prev = t;
+    }
+  }
+
+  const lastVoicedSec = voiced.length ? voiced[voiced.length - 1].timeSec : endSec;
+  const words = [];
+  let sylIdx = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    words.push({ text: tokens[i], startSec: sylStarts[sylIdx], endSec: 0 });
+    sylIdx += counts[i];
+  }
+  for (let i = 0; i < words.length; i++) {
+    words[i].endSec = i + 1 < words.length ? words[i + 1].startSec : Math.max(lastVoicedSec, words[i].startSec + MIN_SYLLABLE_SEC);
+  }
+  return words;
+}

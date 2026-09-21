@@ -3,7 +3,7 @@
 // trailing color-coded line once mic.js is wired in. x maps time linearly;
 // y maps pitch linearly in semitones (reads more naturally than linear Hz).
 
-import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF } from './note-utils.js';
+import { centsOffPitch, interpolateTargetMidi as interpolateTargetMidiShared, pitchTier, TIER_COLOR, MAX_INTERPOLATION_GAP_SEC, MAX_SCOREABLE_CENTS_OFF, estimateWordTimes } from './note-utils.js';
 import { SECONDARY_YIN_THRESHOLD } from './pitch.js';
 
 const WINDOW_SEC = 6;
@@ -18,9 +18,8 @@ const RED_BAND_EXTRA_CENTS = 50;
 // Reserved vertical strip at the bottom of the canvas, for section lyric
 // text. The ribbon's pitch-to-y mapping is compressed to end above this
 // strip (see midiToY), so the ribbon can never physically enter it no
-// matter how the pitch curves. Also doubles as fitSectionText's vertical
-// cap on font size, since a section's lyric is always a single line now —
-// see computeSectionLayout for how a section's actual font size is chosen.
+// matter how the pitch curves. Lyrics are drawn as one row within it (see
+// the lyric ticker in render()).
 const LYRIC_BAND_HEIGHT = 92;
 // The offline analyzer's YIN detector accepts a point down to
 // SECONDARY_YIN_THRESHOLD (see pitch.js) when nothing clears its
@@ -45,44 +44,21 @@ function confidenceAlphaScale(confidence) {
   const norm = Math.max(0, Math.min(1, ((confidence ?? 1) - CONFIDENCE_FLOOR) / (1 - CONFIDENCE_FLOOR)));
   return CONFIDENCE_DIM_ALPHA_SCALE + norm * (1 - CONFIDENCE_DIM_ALPHA_SCALE);
 }
-const MIN_SECTION_FONT_PX = 12;
-// Sanity ceiling only — LYRIC_BAND_HEIGHT (via fitSectionText's own
-// vertical cap below) is what actually binds in the normal case of a
-// short lyric in a long section; this just stops a one-character lyric in
-// a very long section from blowing up to something absurd.
-const MAX_SECTION_FONT_PX = 80;
-const SECTION_LINE_HEIGHT_RATIO = 1.2;
+// Section lyrics are a single-row "ticker": every word in one font size at
+// its natural width, laid out in reading order, and scrolled at whatever speed
+// keeps the word being sung right at the "now" line. Placing words at their
+// true times on the graph's own scale doesn't work -- sung words arrive
+// faster than they fit side by side at that scale -- so instead the line
+// moves faster through quick passages and slower through held notes, and the
+// word under the "now" line is always the one being sung. Words already sung
+// are green, ones still to come are gray.
+const LYRIC_FONT_PX = 36;
+const LYRIC_WORD_GAP_PX = 12;
+const LYRIC_SECTION_GAP_PX = 32;
+const LYRIC_UPCOMING_COLOR = '#6b7280';
 const SECTION_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, sans-serif';
 
-// Picks the font size that makes `text`, rendered as a single line, span
-// exactly maxWidthPx — the section's own full on-screen width — end to
-// end, rather than the largest size that merely fits within a line-count
-// budget. Measuring once at a reference size and scaling proportionally
-// (not a per-pixel search loop) both finds the exact size directly and
-// guarantees a short lyric in a long section actually stretches to fill
-// it, instead of rendering small with empty space trailing after it —
-// which a fixed, capped font-size ladder could never reliably do.
-function fitSectionText(ctx, text, maxWidthPx) {
-  if (!text) return { fontPx: MIN_SECTION_FONT_PX, scaleX: 1, text: '' };
-  const REFERENCE_PX = 100;
-  ctx.font = `bold ${REFERENCE_PX}px ${SECTION_FONT_FAMILY}`;
-  const naturalWidthAtReference = ctx.measureText(text).width;
-  const verticalCapPx = LYRIC_BAND_HEIGHT / SECTION_LINE_HEIGHT_RATIO; // one line must fit the reserved band
-  const fittedPx = naturalWidthAtReference > 0 ? REFERENCE_PX * (maxWidthPx / naturalWidthAtReference) : MAX_SECTION_FONT_PX;
-  const fontPx = Math.max(MIN_SECTION_FONT_PX, Math.min(MAX_SECTION_FONT_PX, verticalCapPx, fittedPx));
-  // fontPx alone can't always reach maxWidthPx — a short lyric in a long
-  // section hits the vertical cap before the width-filling size, and a
-  // long lyric in a short section hits the minimum readable size before
-  // shrinking enough to fit. A horizontal-only stretch/squeeze applied at
-  // render time (not baked into fontPx, which would distort height too)
-  // closes that remaining gap either way, so the line always spans
-  // exactly start to end regardless of how short or long the text is.
-  const naturalWidthAtFontPx = naturalWidthAtReference * (fontPx / REFERENCE_PX);
-  const scaleX = naturalWidthAtFontPx > 0 ? maxWidthPx / naturalWidthAtFontPx : 1;
-  return { fontPx, scaleX, text };
-}
-
-export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = null, sections = [], toleranceCents = 5 }) {
+export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = null, lyricTimeline = pitchTimeline, sections = [], toleranceCents = 5 }) {
   const ctx = canvasEl.getContext('2d');
   // Number.isFinite(p.midi) matters, not just freqHz !== null: minMidi/
   // maxMidi below take Math.min/max across every point's midi in one pass,
@@ -104,7 +80,13 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
   // render() frame, since it only depends on the section's own duration and
   // text, not on playback position or scroll.
   let sectionList = [...sections].sort((a, b) => a.startSec - b.startSec);
-  const sectionLayouts = new Map(); // id -> { fontPx, scaleX, text }
+  const sectionLayouts = new Map(); // id -> { words: [{ text, startSec, naturalW }] }
+  // Every section's words in time order with their x offset along the ticker
+  // (px from the first word's left edge) -- see layoutLyrics.
+  let lyricWords = [];
+  // Word timing follows the lead vocal regardless of which part is being sung
+  // against, so it's fixed at construction and never swapped by setParts().
+  const lyricPoints = (lyricTimeline?.points || []).filter((p) => p.freqHz !== null && Number.isFinite(p.midi));
   // The Settings tolerance slider's green-band threshold — same value
   // scoring.js uses, so a dot's color always matches whether it actually
   // counted as a hit. Mutable via setTolerance() for live Settings changes.
@@ -133,23 +115,34 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
 
   let liveSamples = []; // { timeSec, freqHz, confidence }
 
-  // A section's on-screen width is constant regardless of scroll position —
-  // only its x offset moves as it scrolls through the window — since it's
-  // purely a function of its duration and the fixed time-to-pixel scale.
-  // So the best-fit font size only needs recomputing when the section's own
-  // bounds/text change, or the canvas resizes, never per render() frame.
+  // Each word's estimated start time only depends on the section's own text,
+  // bounds, and the pitch curve -- not on playback position or scroll -- and
+  // its width only on the font, so both are computed once here rather than
+  // every render() frame, and redone only when the section's text/bounds
+  // change or the canvas resizes.
   function computeSectionLayout(section) {
-    const widthCss = canvasEl.getBoundingClientRect().width;
-    const pxPerSec = widthCss / WINDOW_SEC;
-    // The section's full duration, even when that's wider than the canvas
-    // (a section longer than WINDOW_SEC): the line is meant to run from the
-    // section's start to its end, so a long one extends off-screen and
-    // scrolls through with the section rather than being squeezed into one
-    // screenful and stopping partway. The font height is bounded by the
-    // lyric band (see fitSectionText), so this stretches the line
-    // horizontally rather than blowing up its size.
-    const sectionWidthPx = Math.max(10, (section.endSec - section.startSec) * pxPerSec);
-    return fitSectionText(ctx, section.text || '', sectionWidthPx);
+    ctx.font = `bold ${LYRIC_FONT_PX}px ${SECTION_FONT_FAMILY}`;
+    const words = estimateWordTimes(section.text || '', section.startSec, section.endSec, lyricPoints)
+      .map((wd, i) => ({ text: wd.text, startSec: wd.startSec, endSec: wd.endSec, naturalW: ctx.measureText(wd.text).width, firstInSection: i === 0 }));
+    return { words };
+  }
+
+  // Flattens every section's words into one time-ordered list and gives each
+  // its x offset along the ticker: each word starts after the previous one's
+  // width plus a gap (wider between sections). Independent of the canvas
+  // size, so only redone when sections change.
+  function layoutLyrics() {
+    const all = [];
+    for (const section of sectionList) {
+      const layout = sectionLayouts.get(section.id);
+      if (layout) all.push(...layout.words);
+    }
+    all.sort((a, b) => a.startSec - b.startSec);
+    let x = 0;
+    lyricWords = all.map((wd, i) => {
+      if (i > 0) x += all[i - 1].naturalW + (wd.firstInSection ? LYRIC_SECTION_GAP_PX : LYRIC_WORD_GAP_PX);
+      return { text: wd.text, startSec: wd.startSec, endSec: wd.endSec, naturalW: wd.naturalW, x0: x };
+    });
   }
 
   function resize() {
@@ -159,6 +152,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
     canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     for (const section of sectionList) sectionLayouts.set(section.id, computeSectionLayout(section));
+    layoutLyrics();
   }
 
   function midiToY(midi, heightCss) {
@@ -210,11 +204,13 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
     const idx = sectionList.findIndex((s) => s.startSec > section.startSec);
     if (idx === -1) sectionList.push(section); else sectionList.splice(idx, 0, section);
     sectionLayouts.set(section.id, computeSectionLayout(section));
+    layoutLyrics();
   }
 
   function removeSection(id) {
     sectionList = sectionList.filter((s) => s.id !== id);
     sectionLayouts.delete(id);
+    layoutLyrics();
   }
 
   function updateSectionText(id, text) {
@@ -222,6 +218,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
     if (section) {
       section.text = text;
       sectionLayouts.set(id, computeSectionLayout(section));
+      layoutLyrics();
     }
   }
 
@@ -232,6 +229,7 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
       section.endSec = endSec;
       sectionList.sort((a, b) => a.startSec - b.startSec);
       sectionLayouts.set(id, computeSectionLayout(section));
+      layoutLyrics();
     }
   }
 
@@ -353,40 +351,42 @@ export function createVisualizer(canvasEl, { pitchTimeline, secondaryTimeline = 
     ctx.lineTo(nowX, h);
     ctx.stroke();
 
-    // Section lyric text: shown for a section's entire on-screen span, not
-    // just an instant — unlike the old point-in-time cues this replaced —
-    // sized once per section (see computeSectionLayout) to whatever single-
-    // line font size makes it span the section's own fixed width end to
-    // end, so it never jitters in size as the section scrolls through the
-    // window.
-    //
-    // Left-aligned starting at the section's own start-x, not centered:
-    // the section's width was exactly what the font size was fit to, so
-    // left-aligning already lands the line's trailing edge at the
-    // section's own end-x too, without needing separate centering math.
-    ctx.fillStyle = TIER_COLOR.green;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    for (const section of sectionList) {
-      if (section.endSec < rangeStart || section.startSec > rangeEnd) continue;
-      const layout = sectionLayouts.get(section.id);
-      if (!layout || !layout.text) continue;
-      const x = timeToX(section.startSec, nowSec, w);
-      ctx.font = `bold ${layout.fontPx}px ${SECTION_FONT_FAMILY}`;
-      const lineHeight = layout.fontPx * SECTION_LINE_HEIGHT_RATIO;
-      const bandTop = h - LYRIC_BAND_HEIGHT;
-      const startY = bandTop + Math.max(0, (LYRIC_BAND_HEIGHT - lineHeight) / 2);
-      // Horizontal-only stretch/squeeze (see fitSectionText) applied via a
-      // scale transform around the line's own start point, not baked into
-      // the font size, so it widens/narrows the line without affecting its
-      // height/readability.
-      ctx.save();
-      ctx.translate(x, startY);
-      ctx.scale(layout.scaleX, 1);
-      ctx.fillText(layout.text, 0, 0);
-      ctx.restore();
+    // Lyric ticker (see LYRIC_FONT_PX): find the word being sung, and scroll
+    // the whole line so that word's left edge is at the "now" line, easing
+    // toward the next word's left edge as this one's sung time runs out.
+    if (lyricWords.length) {
+      let cur = -1;
+      let lo = 0;
+      let hi = lyricWords.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (lyricWords[mid].startSec <= nowSec) { cur = mid; lo = mid + 1; } else { hi = mid - 1; }
+      }
+      let scroll;
+      if (cur === -1) {
+        scroll = lyricWords[0].x0; // before the first word: it waits at the now line
+      } else {
+        const wd = lyricWords[cur];
+        const next = lyricWords[cur + 1];
+        const f = Math.max(0, Math.min(1, (nowSec - wd.startSec) / Math.max(0.05, wd.endSec - wd.startSec)));
+        scroll = wd.x0 + f * ((next ? next.x0 : wd.x0 + wd.naturalW) - wd.x0);
+      }
+      ctx.font = `bold ${LYRIC_FONT_PX}px ${SECTION_FONT_FAMILY}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const lyricY = h - LYRIC_BAND_HEIGHT + (LYRIC_BAND_HEIGHT - LYRIC_FONT_PX * 1.2) / 2;
+      const originX = NOW_FRAC * w - scroll;
+      const first = Math.max(0, (cur === -1 ? 0 : cur) - 40); // a generous bound; off-screen words are skipped below
+      for (let i = first; i < lyricWords.length; i++) {
+        const wd = lyricWords[i];
+        const x = originX + wd.x0;
+        if (x > w) break;
+        if (x + wd.naturalW < 0) continue;
+        ctx.fillStyle = i <= cur ? TIER_COLOR.green : LYRIC_UPCOMING_COLOR;
+        ctx.fillText(wd.text, x, lyricY);
+      }
+      ctx.textBaseline = 'alphabetic';
     }
-    ctx.textBaseline = 'alphabetic';
 
     // Live pitch trail, color-coded by how far off the target it is.
     for (const s of liveSamples) {

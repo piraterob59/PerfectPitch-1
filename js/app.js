@@ -1367,7 +1367,7 @@ async function openPractice(songId) {
   const otherTimeline = harmonyTimeline ? (singPart === 'harmony' ? leadTimeline : harmonyTimeline) : null;
   practicePartRowEl.hidden = !harmonyTimeline;
   practicePartSelectEl.value = singPart;
-  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline: targetTimeline, secondaryTimeline: otherTimeline, sections: songSections, toleranceCents });
+  const visualizer = createVisualizer(pitchCanvasEl, { pitchTimeline: targetTimeline, secondaryTimeline: otherTimeline, lyricTimeline: leadTimeline, sections: songSections, toleranceCents });
   const accuracyTracker = createAccuracyTracker(targetTimeline, songSections, { toleranceCents });
 
   const voicedForGaps = (pitchTimeline?.points || []).filter((p) => p.freqHz !== null);
