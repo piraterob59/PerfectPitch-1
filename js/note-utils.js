@@ -150,7 +150,7 @@ const INSTRUMENTAL_SKIP_MIN_GAP_SEC = 15;
 // How much instrumental to leave playing right before the next vocal
 // entrance when a gap is skipped — enough to hear the beat/lead-in and
 // come back in on time, rather than being dropped in cold.
-export const INSTRUMENTAL_SKIP_LEAD_IN_SEC = 10;
+export const INSTRUMENTAL_SKIP_LEAD_IN_SEC = 5;
 
 // Finds long instrumental stretches — real gaps in the vocal timeline
 // worth skipping past during playback, not the shorter breath/section gaps

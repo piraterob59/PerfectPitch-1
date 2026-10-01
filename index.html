@@ -96,8 +96,11 @@
           </div>
         </div>
         <div id="instrumental-panel">
-          <p class="panel-label">Instrumental Breaks</p>
-          <p class="panel-note">Skip playback ahead in the checked breaks. Long gaps (15s+ without a vocal) are detected automatically and leave a 10s lead-in before the next vocal; a break you mark yourself is skipped exactly as marked.</p>
+          <div class="panel-header">
+            <p class="panel-label">Instrumental Breaks</p>
+            <button id="instrumental-info-btn" class="btn btn-secondary btn-small" type="button" aria-expanded="false" aria-label="About instrumental breaks">&#9432;</button>
+          </div>
+          <p id="instrumental-note" class="panel-note" hidden>Skip playback ahead in the checked breaks. Long gaps (15s+ without a vocal) are detected automatically and leave a 5s lead-in before the next vocal; a break you mark yourself is skipped exactly as marked.</p>
           <div class="section-controls">
             <button id="mark-break-start-btn" class="btn btn-secondary" type="button">Break Start</button>
             <button id="mark-break-end-btn" class="btn btn-secondary" type="button" disabled>Break End</button>

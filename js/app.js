@@ -502,6 +502,13 @@ const markSectionStartBtn = document.getElementById('mark-section-start-btn');
 const markSectionEndBtn = document.getElementById('mark-section-end-btn');
 const suggestSectionsBtn = document.getElementById('suggest-sections-btn');
 const instrumentalPanelEl = document.getElementById('instrumental-panel');
+const instrumentalNoteEl = document.getElementById('instrumental-note');
+const instrumentalInfoBtn = document.getElementById('instrumental-info-btn');
+instrumentalInfoBtn.addEventListener('click', () => {
+  const nowHidden = !instrumentalNoteEl.hidden;
+  instrumentalNoteEl.hidden = nowHidden;
+  instrumentalInfoBtn.setAttribute('aria-expanded', String(!nowHidden));
+});
 const instrumentalListEl = document.getElementById('instrumental-list');
 const markBreakStartBtn = document.getElementById('mark-break-start-btn');
 const markBreakEndBtn = document.getElementById('mark-break-end-btn');
