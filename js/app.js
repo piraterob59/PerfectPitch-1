@@ -496,6 +496,8 @@ const micLevelFillEl = document.getElementById('mic-level-fill');
 const octaveIndicatorEl = document.getElementById('octave-indicator');
 const accuracyDisplayEl = document.getElementById('accuracy-display');
 const sectionPanelEl = document.getElementById('section-panel');
+const sectionBodyEl = document.getElementById('section-body');
+const toggleSectionsBtn = document.getElementById('toggle-sections-btn');
 const markSectionStartBtn = document.getElementById('mark-section-start-btn');
 const markSectionEndBtn = document.getElementById('mark-section-end-btn');
 const suggestSectionsBtn = document.getElementById('suggest-sections-btn');
@@ -907,6 +909,16 @@ markBreakEndBtn.addEventListener('click', async () => {
   session.skippedGapKeys.delete(`m${startSec.toFixed(2)}`);
   renderInstrumentalList(session.songId);
 });
+
+// Collapsed by default (see openPractice) so a song with a lot of sections
+// doesn't bury the pitch graph and controls under a long list every time the
+// screen opens — editing is still one tap away, just not shown unasked-for.
+function setSectionsCollapsed(collapsed) {
+  sectionBodyEl.hidden = collapsed;
+  toggleSectionsBtn.textContent = collapsed ? 'Open Section Editing' : 'Close Section Editing';
+  toggleSectionsBtn.setAttribute('aria-expanded', String(!collapsed));
+}
+toggleSectionsBtn.addEventListener('click', () => setSectionsCollapsed(!sectionBodyEl.hidden));
 
 markSectionStartBtn.addEventListener('click', () => {
   if (!practiceSession) return;
@@ -1400,6 +1412,7 @@ async function openPractice(songId) {
   practiceToleranceSliderEl.value = toleranceCents;
   practiceToleranceValueEl.textContent = toleranceCents;
   practiceToleranceRowEl.hidden = true;
+  setSectionsCollapsed(true);
   const player = createPlayer(instrumentalStem.blob);
   // User-marked verse/phrase boundaries (see the Sections panel's Mark
   // Start/End buttons) — replaced an earlier silence-gap auto-detection

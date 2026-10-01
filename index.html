@@ -81,14 +81,19 @@
         </div>
         <p id="accuracy-display" class="accuracy-display" hidden>Accuracy: --</p>
         <div id="section-panel">
-          <p class="panel-label">Sections</p>
-          <div class="section-controls">
-            <button id="mark-section-start-btn" class="btn btn-secondary" type="button">Section Start</button>
-            <button id="mark-section-end-btn" class="btn btn-secondary" type="button" disabled>Section End</button>
-            <button id="suggest-sections-btn" class="btn btn-secondary" type="button" hidden>Suggest Sections</button>
-            <span id="section-pending-label" class="section-pending-label"></span>
+          <div class="panel-header">
+            <p class="panel-label">Sections</p>
+            <button id="toggle-sections-btn" class="btn btn-secondary btn-small" type="button" aria-expanded="false">Open Section Editing</button>
           </div>
-          <ul id="section-list" class="section-list"></ul>
+          <div id="section-body" hidden>
+            <div class="section-controls">
+              <button id="mark-section-start-btn" class="btn btn-secondary" type="button">Section Start</button>
+              <button id="mark-section-end-btn" class="btn btn-secondary" type="button" disabled>Section End</button>
+              <button id="suggest-sections-btn" class="btn btn-secondary" type="button" hidden>Suggest Sections</button>
+              <span id="section-pending-label" class="section-pending-label"></span>
+            </div>
+            <ul id="section-list" class="section-list"></ul>
+          </div>
         </div>
         <div id="instrumental-panel">
           <p class="panel-label">Instrumental Breaks</p>
