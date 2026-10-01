@@ -299,10 +299,26 @@ body {
 .panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  /* Spacing moved here from .panel-label's own margin: that margin was
+     asymmetric (16px top, 6px bottom), which made the label's flex-item
+     box taller than the button's and threw off align-items: center by the
+     difference -- the label sat a few pixels lower than the button.
+     Zeroing the label's margin and giving the row identical top/bottom
+     margin instead keeps both children the same height, so they center
+     evenly, while preserving the same overall spacing as before. */
+  margin: 16px 0 6px;
 }
-.panel-header .panel-label { margin: 16px 0 6px; flex: 1; min-width: 0; }
+.panel-header .panel-label {
+  margin: 0;
+  color: #2563eb;
+  flex: 0 0 auto;
+  /* Sized so the label's own line height matches the toggle button's
+     height (28px at the button's 12px font/padding) -- picked by measuring
+     both rather than guessed, since line-height ratios differ between a <p>
+     and a padded <button>. */
+  font-size: 21px;
+}
 .btn-small { padding: 6px 10px; font-size: 12px; }
 #section-body { margin-top: 2px; }
 .section-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
